@@ -11,14 +11,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: APK derle
-        uses: digreatbrian/buildozer-action@v2
+      - name: Python kur
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          buildozer-cmd: buildozer -v android debug
+
+      - name: Buildozer kur
+        run: |
+          pip3 install --upgrade pip
+          pip3 install buildozer cython
+
+      - name: Ek Linux bagimliligi
+        run: sudo apt -y install automake
+
+      - name: APK derle
+        run: |
+          yes | buildozer android debug
 
       - name: APK'yi yukle
         uses: actions/upload-artifact@v4
         with:
           name: aydinlatma-olcum-apk
-          path: ./bin/*.apk
+          path: bin/*.apk
