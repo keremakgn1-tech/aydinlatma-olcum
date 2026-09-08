@@ -1,0 +1,25 @@
+name: APK Derle
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Buildozer ile derle
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: APK'yi yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: aydinlatma-olcum-apk
+          path: ${{ steps.buildozer.outputs.filename }}
