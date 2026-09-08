@@ -22,7 +22,7 @@ jobs:
           pip3 install buildozer "Cython==0.29.33"
 
       - name: Ek Linux bagimliligi
-        run: sudo apt -y install automake
+        run: sudo apt -y install automake libtool
 
       - name: APK derle
         run: |
