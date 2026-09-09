@@ -21,7 +21,7 @@ jobs:
           pip3 install --upgrade pip
           pip3 install buildozer "Cython==0.29.33"
           git clone https://github.com/kivy/python-for-android.git p4a-src
-          python3 patch_p4a.py p4a-src/pythonforandroid/build.py
+          cd p4a-src && git checkout cda8e65d33c4851ba4e5ddcacc18041bd235c382 && cd ..
 
       - name: Ek Linux bagimliligi
         run: sudo apt -y install automake autoconf libtool libltdl-dev
