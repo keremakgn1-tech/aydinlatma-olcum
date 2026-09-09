@@ -9,6 +9,7 @@ source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
 requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,openpyxl,fpdf2
+p4a.source_dir = %(root)s/p4a-src
 
 orientation = portrait
 fullscreen = 0
