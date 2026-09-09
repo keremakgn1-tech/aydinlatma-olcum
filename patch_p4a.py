@@ -6,14 +6,18 @@ Resmi duzeltme (kivy/python-for-android PR #3360) su iki degisikligi yapar:
   1) venv olusturulurken --clear bayragi eklenir (eski/bozuk klasor temizlenir)
   2) 'pip install -U pip' adimi tamamen kaldirilir (gereksiz ve riskli)
 
-Bu script, o duzeltmeyi PIP ILE KURULMUS olan python-for-android paketine
-dogrudan uygular - hangi surumden geldigi onemli degil, garantili calisir.
+Kullanim: python3 patch_p4a.py /yol/python-for-android/pythonforandroid/build.py
 """
 import re
 import os
-import pythonforandroid
+import sys
 
-path = os.path.join(os.path.dirname(pythonforandroid.__file__), "build.py")
+if len(sys.argv) > 1:
+    path = sys.argv[1]
+else:
+    import pythonforandroid
+    path = os.path.join(os.path.dirname(pythonforandroid.__file__), "build.py")
+
 print(f"Yamalanacak dosya: {path}")
 
 with open(path, "r", encoding="utf-8") as f:
