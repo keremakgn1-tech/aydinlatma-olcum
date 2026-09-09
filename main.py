@@ -1798,12 +1798,77 @@ class ReportScreen(Screen):
         popup.open()
 
     def _export_dir(self):
+        """Gecici (herkese acik olmayan) calisma klasoru - dosya once buraya
+        yazilir, sonra _publish_to_downloads() ile gercek 'Indirilenler'e tasinir."""
         try:
             app = App.get_running_app()
             path = app.user_data_dir
         except Exception:
             path = "."
         return path
+
+    def _publish_to_downloads(self, temp_path, filename, mime_type):
+        """Gecici dosyayi telefonun HERKESE ACIK 'Indirilenler' klasorune tasir/kopyalar.
+        Android 10+ (API 29+): MediaStore uzerinden (guncel, onerilen yontem).
+        Android 9 ve altı: dogrudan public Downloads klasorune yazar.
+        Android disinda (masaustu test): dosya oldugu yerde kalir.
+        Basarili olursa kullaniciya gosterilecek AÇIKLAYICI konum metnini dondurur."""
+        try:
+            from jnius import autoclass
+        except Exception:
+            # Android degil (masaustu/test ortami) - dosya zaten _export_dir'de duruyor
+            return temp_path
+
+        try:
+            Build_VERSION = autoclass('android.os.Build$VERSION')
+            sdk_int = Build_VERSION.SDK_INT
+
+            if sdk_int >= 29:
+                # --- Android 10+: MediaStore uzerinden Indirilenler'e yaz ---
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                context = PythonActivity.mActivity
+                ContentValues = autoclass('android.content.ContentValues')
+                MediaStore = autoclass('android.provider.MediaStore')
+
+                resolver = context.getContentResolver()
+                values = ContentValues()
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/")
+
+                downloads_uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                item_uri = resolver.insert(downloads_uri, values)
+                if item_uri is None:
+                    return temp_path  # basarisiz olursa eski (gizli) konumda kalsin
+
+                out_stream = resolver.openOutputStream(item_uri)
+                with open(temp_path, "rb") as f:
+                    data = f.read()
+                out_stream.write(data)
+                out_stream.close()
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                return f"Indirilenler/{filename}"
+            else:
+                # --- Android 9 ve altı: dogrudan public Downloads klasorune yaz ---
+                Environment = autoclass('android.os.Environment')
+                public_dir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
+                os.makedirs(public_dir, exist_ok=True)
+                final_path = os.path.join(public_dir, filename)
+                with open(temp_path, "rb") as src, open(final_path, "wb") as dst:
+                    dst.write(src.read())
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                return final_path
+        except Exception:
+            # Herhangi bir Android-özel hata olursa, dosya en azindan
+            # gizli-ama-var olan eski konumda kalsin, uygulama çökmesin
+            return temp_path
 
     def export_pdf(self):
         data = self._compute_report_data()
@@ -1907,7 +1972,7 @@ class ReportScreen(Screen):
                 pdf.cell(col_w_raw[0], 6, str(idx + 1), border=1, align="C")
                 for w, (title, _) in zip(col_w_raw[1:], PROBES):
                     val = d["values"].get(title)
-                    pdf.cell(w, 6, f"{val:.0f}" if val is not None else "-", border=1, align="C")
+                    pdf.cell(w, 6, f"{val}" if val is not None else "-", border=1, align="C")
                 pdf.ln()
 
             # --- YENI: Her veri seti icin renkli Isi Haritasi sayfasi ---
@@ -1946,14 +2011,15 @@ class ReportScreen(Screen):
                         txt_rgba = text_color_for_bg(rgba)
                         pdf.set_text_color(int(txt_rgba[0]*255), int(txt_rgba[1]*255), int(txt_rgba[2]*255))
                         pdf.set_xy(x, y + cell_h / 2 - 2)
-                        pdf.set_font("Helvetica", "B", 7)
-                        pdf.cell(cell_w, 4, f"{val:.0f}", align="C")
+                        pdf.set_font("Helvetica", "B", 6.5)
+                        pdf.cell(cell_w, 4, f"{val}", align="C")
                 pdf.set_text_color(0, 0, 0)
 
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
             pdf.output(fpath)
-            self._show_message_popup("PDF Kaydedildi", f"Dosya kaydedildi:\n{fpath}")
+            final_location = self._publish_to_downloads(fpath, fname, "application/pdf")
+            self._show_message_popup("PDF Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
         except Exception as e:
             self._show_message_popup("PDF Hatasi", f"PDF olusturulurken bir sorun olustu:\n{e}")
 
@@ -2087,7 +2153,9 @@ class ReportScreen(Screen):
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             fpath = os.path.join(self._export_dir(), fname)
             wb.save(fpath)
-            self._show_message_popup("Excel Kaydedildi", f"Dosya kaydedildi:\n{fpath}")
+            final_location = self._publish_to_downloads(
+                fpath, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self._show_message_popup("Excel Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
         except Exception as e:
             self._show_message_popup("Excel Hatasi", f"Excel olusturulurken bir sorun olustu:\n{e}")
 
