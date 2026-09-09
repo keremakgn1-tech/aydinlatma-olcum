@@ -1812,11 +1812,10 @@ class ReportScreen(Screen):
             return
         try:
             from fpdf import FPDF
-        except ImportError:
+        except Exception as e:
             self._show_message_popup(
-                "PDF Kutuphanesi Eksik",
-                "PDF olusturmak icin 'fpdf2' kutuphanesi gerekiyor.\n"
-                "Pydroid 3'te pip sekmesinden 'fpdf2' yazip kurun.")
+                "PDF Kutuphanesi Sorunu",
+                f"'fpdf2' kutuphanesi yuklenemedi.\n\nTeknik detay:\n{type(e).__name__}: {e}")
             return
 
         try:
@@ -1878,6 +1877,79 @@ class ReportScreen(Screen):
                 pdf.cell(0, 7, "UYGUN" if data["maur_ok"] else "UYGUN DEGIL", ln=True)
                 pdf.set_text_color(0, 0, 0)
 
+            # --- YENI: Ham Olcum Verileri sayfasi ---
+            raw_seq = data["raw_sequence"]
+            raw_meas = data["raw_measurements"]
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.cell(0, 10, "Ham Olcum Verileri", ln=True)
+            pdf.ln(2)
+            headers_raw = ["Grid No"] + [title for title, _ in PROBES]
+            col_w_raw = [22, 33, 33, 33, 33, 33]
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_fill_color(230, 230, 230)
+            for w, h in zip(col_w_raw, headers_raw):
+                pdf.cell(w, 7, h, border=1, fill=True, align="C")
+            pdf.ln()
+            pdf.set_font("Helvetica", "", 9)
+            for idx in range(len(raw_seq)):
+                d = raw_meas.get(idx)
+                if d is None:
+                    continue
+                if pdf.get_y() > 270:  # sayfa sonuna yakinsa yeni sayfa ac, basligi tekrarla
+                    pdf.add_page()
+                    pdf.set_font("Helvetica", "B", 9)
+                    pdf.set_fill_color(230, 230, 230)
+                    for w, h in zip(col_w_raw, headers_raw):
+                        pdf.cell(w, 7, h, border=1, fill=True, align="C")
+                    pdf.ln()
+                    pdf.set_font("Helvetica", "", 9)
+                pdf.cell(col_w_raw[0], 6, str(idx + 1), border=1, align="C")
+                for w, (title, _) in zip(col_w_raw[1:], PROBES):
+                    val = d["values"].get(title)
+                    pdf.cell(w, 6, f"{val:.0f}" if val is not None else "-", border=1, align="C")
+                pdf.ln()
+
+            # --- YENI: Her veri seti icin renkli Isi Haritasi sayfasi ---
+            rows_n = data["rows_count"]
+            cols_n = data["cols_count"]
+            for title, _ in PROBES:
+                grid = self._dataset_grid(raw_meas, rows_n, cols_n, title)
+                vals = [v for row_vals in grid for v in row_vals if v is not None]
+                if not vals:
+                    continue
+                vmin_g, vmax_g = min(vals), max(vals)
+
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 14)
+                pdf.cell(0, 10, f"Isi Haritasi - {title}", ln=True)
+                pdf.ln(2)
+
+                avail_w = 190
+                avail_h = 220
+                cell_w = min(avail_w / rows_n, 22)
+                cell_h = min(avail_h / cols_n, 14)
+                start_x = pdf.get_x()
+                start_y = pdf.get_y()
+
+                for c_idx, row_vals in enumerate(grid):
+                    for r_idx, val in enumerate(row_vals):
+                        x = start_x + r_idx * cell_w
+                        y = start_y + c_idx * cell_h
+                        if val is None:
+                            pdf.set_fill_color(230, 230, 230)
+                            pdf.rect(x, y, cell_w, cell_h, style="F")
+                            continue
+                        rgba = lux_color(val, vmin_g, vmax_g)
+                        pdf.set_fill_color(int(rgba[0]*255), int(rgba[1]*255), int(rgba[2]*255))
+                        pdf.rect(x, y, cell_w, cell_h, style="F")
+                        txt_rgba = text_color_for_bg(rgba)
+                        pdf.set_text_color(int(txt_rgba[0]*255), int(txt_rgba[1]*255), int(txt_rgba[2]*255))
+                        pdf.set_xy(x, y + cell_h / 2 - 2)
+                        pdf.set_font("Helvetica", "B", 7)
+                        pdf.cell(cell_w, 4, f"{val:.0f}", align="C")
+                pdf.set_text_color(0, 0, 0)
+
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
             pdf.output(fpath)
@@ -1893,11 +1965,10 @@ class ReportScreen(Screen):
         try:
             import openpyxl
             from openpyxl.styles import Font, PatternFill
-        except ImportError:
+        except Exception as e:
             self._show_message_popup(
-                "Excel Kutuphanesi Eksik",
-                "Excel olusturmak icin 'openpyxl' kutuphanesi gerekiyor.\n"
-                "Pydroid 3'te pip sekmesinden 'openpyxl' yazip kurun.")
+                "Excel Kutuphanesi Sorunu",
+                f"'openpyxl' kutuphanesi yuklenemedi.\n\nTeknik detay:\n{type(e).__name__}: {e}")
             return
 
         try:
@@ -1966,6 +2037,52 @@ class ReportScreen(Screen):
 
             for col_letter, width in zip("ABCDE", [22, 16, 12, 12, 14]):
                 ws.column_dimensions[col_letter].width = width
+
+            # --- YENI: Ham Olcum Verileri sayfasi (Olcum Verisi ekranindaki tablo) ---
+            ws2 = wb.create_sheet("Olcum Verileri")
+            headers2 = ["Grid No"] + [title for title, _ in PROBES]
+            for col, h in enumerate(headers2, start=1):
+                cell = ws2.cell(row=1, column=col, value=h)
+                cell.font = bold
+                cell.fill = gray_fill
+            raw_seq = data["raw_sequence"]
+            raw_meas = data["raw_measurements"]
+            r_row = 2
+            for idx in range(len(raw_seq)):
+                d = raw_meas.get(idx)
+                if d is None:
+                    continue
+                ws2.cell(row=r_row, column=1, value=idx + 1)
+                for col, (title, _) in enumerate(PROBES, start=2):
+                    ws2.cell(row=r_row, column=col, value=d["values"].get(title))
+                r_row += 1
+            for col_letter in "ABCDEF":
+                ws2.column_dimensions[col_letter].width = 12
+
+            # --- YENI: Her veri seti icin renkli Isi Haritasi sayfasi ---
+            rows_n = data["rows_count"]
+            cols_n = data["cols_count"]
+            for title, _ in PROBES:
+                grid = self._dataset_grid(raw_meas, rows_n, cols_n, title)
+                vals = [v for row_vals in grid for v in row_vals if v is not None]
+                if not vals:
+                    continue
+                vmin_g, vmax_g = min(vals), max(vals)
+                ws3 = wb.create_sheet(f"Isi Haritasi - {title}")
+                for c_idx, row_vals in enumerate(grid):
+                    for r_idx, val in enumerate(row_vals):
+                        cell = ws3.cell(row=c_idx + 1, column=r_idx + 1)
+                        if val is None:
+                            continue
+                        cell.value = val
+                        rgba = lux_color(val, vmin_g, vmax_g)
+                        hexcolor = "".join(f"{int(max(0,min(1,ch))*255):02X}" for ch in rgba[:3])
+                        cell.fill = PatternFill("solid", fgColor=hexcolor)
+                        txt_rgba = text_color_for_bg(rgba)
+                        txt_hex = "".join(f"{int(max(0,min(1,ch))*255):02X}" for ch in txt_rgba[:3])
+                        cell.font = Font(bold=True, color=txt_hex)
+                for col_idx in range(1, rows_n + 1):
+                    ws3.column_dimensions[ws3.cell(row=1, column=col_idx).column_letter].width = 10
 
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             fpath = os.path.join(self._export_dir(), fname)
@@ -2045,7 +2162,21 @@ class ReportScreen(Screen):
             "maur_ratio": maur_ratio, "maur_max_fail": maur_max_fail,
             "maur_total_fail": maur_total_fail, "maur_ok": maur_ok,
             "project_info": dict(ms.project_info),
+            "raw_sequence": list(ms.sequence),
+            "raw_measurements": {idx: dict(d) for idx, d in measured.items()},
+            "rows_count": ms.rows_count_val,
+            "cols_count": ms.cols_count_val,
         }
+
+    def _dataset_grid(self, raw_measurements, rows_n, cols_n, dataset_key):
+        """Kontrol Panelindeki gorsel duzenle BIREBIR eslesen 2D veri gridi olusturur.
+        Donen: grid[sutun_index][satir_index] = deger (sutun=0 en ustte, satir=0 en solda)."""
+        grid = [[None] * rows_n for _ in range(cols_n)]
+        for idx, d in raw_measurements.items():
+            r, c = d["r"], d["c"]
+            if 0 <= r < rows_n and 0 <= c < cols_n:
+                grid[c][r] = d["values"].get(dataset_key)
+        return grid
 
     def _build_report(self):
         self.content_area.clear_widgets()
