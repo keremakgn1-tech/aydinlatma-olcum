@@ -19,7 +19,8 @@ jobs:
       - name: Buildozer kur
         run: |
           pip3 install --upgrade pip
-          pip3 install buildozer "Cython==0.29.33"
+          pip3 install buildozer cython
+          pip3 install --force-reinstall --no-deps git+https://github.com/kivy/python-for-android.git@master
 
       - name: Ek Linux bagimliligi
         run: sudo apt -y install automake autoconf libtool libltdl-dev
