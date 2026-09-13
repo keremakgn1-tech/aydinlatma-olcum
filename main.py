@@ -6,12 +6,14 @@
 import random
 import json
 import os
+import math
 import socket
 import threading
 from datetime import datetime
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.animation import Animation
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
@@ -23,8 +25,9 @@ from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
 from kivy.uix.widget import Widget
 from kivy.uix.image import Image
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.scatter import Scatter
 from kivy.graphics.texture import Texture
-from kivy.graphics import Color, RoundedRectangle, Rectangle, Line, Ellipse
+from kivy.graphics import Color, RoundedRectangle, Rectangle, Line, Ellipse, Triangle
 from kivy.metrics import sp, dp
 
 
@@ -47,9 +50,64 @@ SUCCESS_TINT = (0.09, 0.20, 0.12, 1)
 DANGER = (0.75, 0.25, 0.28, 1)
 GREEN_TXT = (0.36, 0.79, 0.54, 1)
 RED_TXT = (0.88, 0.48, 0.48, 1)
-ROW_A = (0.082, 0.082, 0.094, 1)
-ROW_B = (0.102, 0.102, 0.122, 1)
-HEADER_BG = (0.13, 0.13, 0.15, 1)
+
+# --- YENI: Gunduz/Gece Modu tema sistemi ---
+DARK_PALETTE = {
+    "BG": (0.06, 0.06, 0.07, 1), "CARD": (0.10, 0.10, 0.12, 1),
+    "CARD_LIGHT": (0.19, 0.19, 0.23, 1), "BORDER": (0.26, 0.26, 0.30, 1),
+    "TEXT": (0.91, 0.91, 0.92, 1), "TEXT_MUTED": (0.54, 0.54, 0.58, 1),
+    "ACCENT": (0.35, 0.61, 0.85, 1), "SUCCESS": (0.18, 0.55, 0.34, 1),
+    "SUCCESS_TINT": (0.09, 0.20, 0.12, 1), "DANGER": (0.75, 0.25, 0.28, 1),
+    "GREEN_TXT": (0.36, 0.79, 0.54, 1), "RED_TXT": (0.88, 0.48, 0.48, 1),
+    "NAV_BG": (0.09, 0.09, 0.10, 1),
+    "ROW_A": (0.082, 0.082, 0.094, 1), "ROW_B": (0.102, 0.102, 0.122, 1),
+    "HEADER_BG": (0.13, 0.13, 0.15, 1), "DANGER_TINT": (0.22, 0.09, 0.10, 1),
+}
+LIGHT_PALETTE = {
+    "BG": (0.95, 0.95, 0.96, 1), "CARD": (0.99, 0.99, 1.00, 1),
+    "CARD_LIGHT": (0.89, 0.89, 0.92, 1), "BORDER": (0.78, 0.78, 0.82, 1),
+    "TEXT": (0.10, 0.10, 0.12, 1), "TEXT_MUTED": (0.40, 0.40, 0.45, 1),
+    "ACCENT": (0.14, 0.40, 0.70, 1), "SUCCESS": (0.14, 0.48, 0.30, 1),
+    "SUCCESS_TINT": (0.85, 0.94, 0.87, 1), "DANGER": (0.70, 0.16, 0.18, 1),
+    "GREEN_TXT": (0.12, 0.50, 0.28, 1), "RED_TXT": (0.68, 0.16, 0.16, 1),
+    "NAV_BG": (0.91, 0.91, 0.94, 1),
+    "ROW_A": (0.97, 0.97, 0.99, 1), "ROW_B": (0.93, 0.93, 0.96, 1),
+    "HEADER_BG": (0.86, 0.86, 0.90, 1), "DANGER_TINT": (0.96, 0.87, 0.87, 1),
+}
+CURRENT_THEME = "dark"
+NAV_BG = DARK_PALETTE["NAV_BG"]
+
+
+def apply_palette(name):
+    """Secilen temanin renklerini modul-seviyesi sabitlere uygular.
+    Bu, widget agacini yeniden insa etmeden ONCE cagrilmali - Kivy widget'lari
+    renkleri OLUSTURULDUKLARI anda okuyup canvas'a gomuyor."""
+    global CURRENT_THEME, STATUS_BG
+    palette = LIGHT_PALETTE if name == "light" else DARK_PALETTE
+    globals().update(palette)
+    STATUS_BG = LIGHT_STATUS_BG if name == "light" else DARK_STATUS_BG
+    CURRENT_THEME = name
+
+
+def load_saved_theme():
+    """Uygulama acilirken, widget'lar insa edilmeden ONCE hangi temanin
+    kayitli oldugunu okur (dosya yoksa/bozuksa varsayilan: gece modu)."""
+    try:
+        app = App.get_running_app()
+        path = os.path.join(app.user_data_dir, "aydinlatma_session.json")
+        if not os.path.exists(path):
+            return "dark"
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("theme", "dark")
+    except Exception:
+        return "dark"
+
+
+ROW_A = DARK_PALETTE["ROW_A"]
+ROW_B = DARK_PALETTE["ROW_B"]
+HEADER_BG = DARK_PALETTE["HEADER_BG"]
+DANGER_TINT = DARK_PALETTE["DANGER_TINT"]
 
 STANDARDS = {
     "FIFA": {
@@ -150,20 +208,56 @@ STANDARDS = {
 
 PROBES = [("Eh", "Eh"), ("Ev0", "Ev"), ("Ev90", "Ev"), ("Ev180", "Ev"), ("Ev270", "Ev")]
 
+# --- Sabit olcum cihazi bilgileri (gercek donanimla eslesiyor - degismez) ---
+METER_MODEL = "Konica Minolta T-10A"
+METER_SERIAL = "20022401"
+PROBE_SERIALS = {
+    "Eh":   "30023761",  # Alici Kafa No.0
+    "Ev0":  "30023200",  # Alici Kafa No.1
+    "Ev90": "30023785",  # Alici Kafa No.2
+    "Ev180": "30023788",  # Alici Kafa No.3
+    "Ev270": "30023165",  # Alici Kafa No.4
+}
+
+# --- Sabit kurulus/denetleyen bilgileri (degismez - her seferinde girilmeye gerek yok) ---
+ORG_NAME = "ŞAH ELEKTRİK İNŞAAT ÇELİK TAAH. SAN. VE TİC. A.Ş."
+ORG_ADDRESS = "Soğanlık Yeni Mah. Balıkesir Cad. Uprise Elite Residence No:6/306 Kartal / İstanbul"
+ORG_PHONE_EMAIL = "0216 459 86 26 - kerem.akgun@sahgroup.net"
+INSPECTOR_NAME = "Kerem AKGÜN"
+
 
 # ---------------------------------------------------------
 # ORTAK GORSEL BILESENLER
 # ---------------------------------------------------------
+class PopupContent(BoxLayout):
+    """Popup icerigi icin KENDI cizdigimiz temaya-uyumlu arka plan.
+    Kivy'nin yerlesik Popup.background_color'i guvenilir calismadigi
+    icin (ic gorsel katmanlari bizim renklerimizi gormezden gelebiliyor),
+    Card ile ayni yontemi (Color + RoundedRectangle) kullaniyoruz."""
+    def __init__(self, **kwargs):
+        super().__init__(orientation="vertical", **kwargs)
+        with self.canvas.before:
+            self.bg_instr = Color(*CARD)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[14])
+        self.bind(pos=self._update, size=self._update)
+
+    def _update(self, *a):
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+
+
 class Card(BoxLayout):
-    def __init__(self, bg_color=CARD, radius=14, border_color=None, **kwargs):
+    def __init__(self, bg_color=CARD, radius=14, border_color="__default__", **kwargs):
         super().__init__(**kwargs)
         self.radius = radius
+        if border_color == "__default__":
+            border_color = BORDER  # belirtilmemisse ince, sonuk bir kenarlik kullan
         with self.canvas.before:
             self.bg_instr = Color(*bg_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[radius])
             if border_color:
                 Color(*border_color)
-                self.border_line = Line(width=1.3)
+                self.border_line = Line(width=1.1)
             else:
                 self.border_line = None
         self.bind(pos=self._update, size=self._update)
@@ -178,7 +272,7 @@ class Card(BoxLayout):
 
 class FlatButton(Button):
     def __init__(self, bg_color=CARD_LIGHT, radius=12, **kwargs):
-        kwargs.setdefault('color', TEXT)
+        kwargs.setdefault('color', text_color_for_bg(bg_color))
         super().__init__(background_normal='', background_down='',
                           background_color=(0, 0, 0, 0), **kwargs)
         self.radius = radius
@@ -250,22 +344,36 @@ class TabIcon(Widget):
                 Line(rounded_rectangle=(x + w * 0.12, y + h * 0.08, w * 0.76, h * 0.84, 4), width=1.6)
                 for frac in [0.65, 0.45, 0.25]:
                     Line(points=[x + w * 0.28, y + h * frac, x + w * 0.72, y + h * frac], width=1.4)
-            elif self.kind == "control":
-                for i, frac in enumerate([0.75, 0.5, 0.25]):
-                    yy = y + h * frac
-                    Line(points=[x + w * 0.1, yy, x + w * 0.9, yy], width=1.4)
-                    knob_x = x + w * (0.3 + i * 0.2)
-                    Ellipse(pos=(knob_x - dp(3), yy - dp(3)), size=(dp(6), dp(6)))
+            elif self.kind == "result":
+                Line(points=[x + w * 0.10, y + h * 0.15, x + w * 0.90, y + h * 0.15], width=1.4)
+                bar_w = w * 0.13
+                for bx, bh in zip([0.22, 0.42, 0.62, 0.82], [0.35, 0.65, 0.50, 0.80]):
+                    Line(rounded_rectangle=(x + w * bx - bar_w / 2, y + h * 0.15,
+                                             bar_w, h * bh, 2), width=1.6)
             elif self.kind == "report":
                 Line(rounded_rectangle=(x + w * 0.18, y + h * 0.06, w * 0.64, h * 0.88, 3), width=1.6)
                 for frac in [0.68, 0.52, 0.36]:
                     Line(points=[x + w * 0.3, y + h * frac, x + w * 0.7, y + h * frac], width=1.3)
+            elif self.kind == "settings":
+                cx, cy = x + w / 2, y + h / 2
+                Line(circle=(cx, cy, w * 0.20), width=1.6)
+                Line(circle=(cx, cy, w * 0.07), width=1.6)
+                for i in range(8):
+                    ang = math.radians(i * 45)
+                    inner, outer = w * 0.30, w * 0.42
+                    Line(points=[cx + inner * math.cos(ang), cy + inner * math.sin(ang),
+                                 cx + outer * math.cos(ang), cy + outer * math.sin(ang)], width=1.6)
 
 
 class NavButton(BoxLayout):
     def __init__(self, kind, label, on_press, **kwargs):
         super().__init__(orientation="vertical", **kwargs)
         self.on_press_cb = on_press
+        with self.canvas.before:
+            self.bg_instr = Color(*CARD_LIGHT)
+            self.bg_instr.a = 0.0  # baslangicta aktif degil - gorunmez
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[12])
+        self.bind(pos=self._update_bg, size=self._update_bg)
         self.icon = TabIcon(kind)
         icon_wrap = BoxLayout(size_hint_y=0.6)
         icon_wrap.add_widget(Widget())
@@ -274,6 +382,11 @@ class NavButton(BoxLayout):
         self.add_widget(icon_wrap)
         self.label = Label(text=label, font_size=sp(11.5), size_hint_y=0.4, color=TEXT_MUTED)
         self.add_widget(self.label)
+
+    def _update_bg(self, *a):
+        inset_x, inset_y = dp(4), dp(4)
+        self.bg_rect.pos = (self.x + inset_x, self.y + inset_y)
+        self.bg_rect.size = (self.width - 2 * inset_x, self.height - 2 * inset_y)
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
@@ -284,6 +397,7 @@ class NavButton(BoxLayout):
     def set_active(self, active):
         self.icon.set_active(active)
         self.label.color = ACCENT if active else TEXT_MUTED
+        self.bg_instr.a = 1.0 if active else 0.0
 
 
 def fetch_pi_data(ip, port, timeout=2.5):
@@ -318,6 +432,30 @@ STATUS_LABELS = {
 }
 
 
+class TextSpinner:
+    """Bir butonun/etiketin metnine basit, donen bir karakter ekleyerek
+    'islem suruyor' hissi verir - agir grafik/animasyon gerektirmeden."""
+    FRAMES = ["|", "/", "-", "\\"]
+
+    def __init__(self, widget, base_text):
+        self.widget = widget
+        self.base_text = base_text
+        self.idx = 0
+        self.widget.text = f"{self.FRAMES[0]} {base_text}"
+        self.event = Clock.schedule_interval(self._tick, 0.12)
+
+    def _tick(self, dt):
+        self.idx = (self.idx + 1) % len(self.FRAMES)
+        self.widget.text = f"{self.FRAMES[self.idx]} {self.base_text}"
+
+    def stop(self, final_text=None):
+        if self.event:
+            self.event.cancel()
+            self.event = None
+        if final_text is not None:
+            self.widget.text = final_text
+
+
 class StatusDot(Widget):
     """Baglanti durumunu gosteren kucuk renkli daire."""
     def __init__(self, **kwargs):
@@ -337,12 +475,19 @@ class StatusDot(Widget):
         self.color_instr.rgba = STATUS_COLORS.get(status, STATUS_COLORS["disconnected"])
 
 
-STATUS_BG = {
+DARK_STATUS_BG = {
     "connected": (0.055, 0.11, 0.075, 1),
     "device_silent": (0.12, 0.09, 0.045, 1),
     "disconnected": (0.13, 0.065, 0.07, 1),
     "checking": (0.10, 0.10, 0.06, 1),
 }
+LIGHT_STATUS_BG = {
+    "connected": (0.85, 0.95, 0.87, 1),
+    "device_silent": (0.98, 0.92, 0.80, 1),
+    "disconnected": (0.97, 0.87, 0.87, 1),
+    "checking": (0.97, 0.96, 0.80, 1),
+}
+STATUS_BG = DARK_STATUS_BG
 
 
 class ConnectionStrip(BoxLayout):
@@ -380,7 +525,12 @@ class ConnectionStrip(BoxLayout):
 
     def set_status(self, status):
         self.dot.set_status(status)
-        self.label.text = STATUS_LABELS.get(status, status)
+        base_text = STATUS_LABELS.get(status, status)
+        if status != "checking":
+            time_str = datetime.now().strftime("%H:%M")
+            self.label.text = f"{base_text}  ·  {time_str}"
+        else:
+            self.label.text = base_text
         self.bg_instr.rgba = STATUS_BG.get(status, STATUS_BG["disconnected"])
         self.border_instr.rgba = STATUS_COLORS.get(status, STATUS_COLORS["disconnected"])
 
@@ -463,6 +613,10 @@ class TableRow(BoxLayout):
 class MeasureScreen(Screen):
     def __init__(self, on_open_standards=None, **kwargs):
         super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*BG)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._update_bg, size=self._update_bg)
         self.on_open_standards = on_open_standards
         self.sequence = []
         self.current_index = 0
@@ -504,7 +658,7 @@ class MeasureScreen(Screen):
         self.point_card = Card(bg_color=SUCCESS_TINT, radius=14, border_color=SUCCESS,
                                 size_hint_y=None, height=dp(58), padding=[dp(16), 0, dp(16), 0])
         point_row = BoxLayout()
-        point_row.add_widget(Label(text="Aktif nokta", font_size=sp(13), color=(0.6, 0.85, 0.7, 1),
+        point_row.add_widget(Label(text="Aktif nokta", font_size=sp(13), color=SUCCESS,
                                     size_hint_x=0.45))
         self.active_point_label = Label(text="Izgarayi baslatin", font_size=sp(15), bold=True, color=TEXT)
         point_row.add_widget(self.active_point_label)
@@ -539,6 +693,15 @@ class MeasureScreen(Screen):
         self.add_widget(outer)
         self._recompute_sequence(start=False)
         self.project_info = {"name": "", "location": "", "date": "", "prepared_by": ""}
+        self.fifa_info = {
+            "lum1_manufacturer": "", "lum1_model": "",
+            "cal_date": "",
+            "colour_meter": "", "colour_meter_serial": "", "colour_meter_cal_date": "",
+            "pitch_width": "", "pitch_length": "",
+            "flicker_avg": "", "flicker_max": "",
+            "colour_temp_tc": "", "colour_rendering_ra": "", "glare_rating_rg": "",
+        }
+        self.report_language = "tr"  # "tr" veya "en" - PDF raporunun dili
         self.pi_ip = "192.168.0.222"
         self.pi_port = 8899
         self.connection_status = "disconnected"
@@ -550,6 +713,10 @@ class MeasureScreen(Screen):
         # "Baglan" denemesiyle cakisip gereksiz gecikmeye yol aciyordu.
 
     # --- Kalici kayit (uygulama kapanirsa/coksekirse veri kaybolmasin) ---
+    def _update_bg(self, *a):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
     def _session_path(self):
         try:
             app = App.get_running_app()
@@ -557,21 +724,30 @@ class MeasureScreen(Screen):
         except Exception:
             return None
 
+    def _build_session_dict(self):
+        """Tum oturum verisini TEK bir sozluk olarak dondurur - hem otomatik
+        kayit (save_session) hem de kullanicinin elle 'Disa Aktar' islemi
+        AYNI bu fonksiyonu kullanir, boylece ikisi hep tutarli kalir."""
+        return {
+            "org": self.org, "level": self.level,
+            "rows": self.rows_count_val, "cols": self.cols_count_val,
+            "frontier_index": self.frontier_index,
+            "measurements": {str(k): v for k, v in self.measurements.items()},
+            "project_info": self.project_info,
+            "fifa_info": self.fifa_info,
+            "report_language": self.report_language,
+            "pi_ip": self.pi_ip,
+            "pi_port": self.pi_port,
+            "theme": CURRENT_THEME,
+            "saved_at": datetime.now().isoformat(),
+        }
+
     def save_session(self):
         path = self._session_path()
         if not path:
             return
         try:
-            data = {
-                "org": self.org, "level": self.level,
-                "rows": self.rows_count_val, "cols": self.cols_count_val,
-                "frontier_index": self.frontier_index,
-                "measurements": {str(k): v for k, v in self.measurements.items()},
-                "project_info": self.project_info,
-                "pi_ip": self.pi_ip,
-                "pi_port": self.pi_port,
-                "saved_at": datetime.now().isoformat(),
-            }
+            data = self._build_session_dict()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
         except Exception:
@@ -584,30 +760,35 @@ class MeasureScreen(Screen):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.org = data.get("org", self.org)
-            self.level = data.get("level", self.level)
-            self.rows_count_val = data.get("rows", self.rows_count_val)
-            self.cols_count_val = data.get("cols", self.cols_count_val)
-            self.project_info.update(data.get("project_info", {}))
-            self.pi_ip = data.get("pi_ip", self.pi_ip)
-            self.pi_port = data.get("pi_port", self.pi_port)
-            self.grid_value_label.text = f"{self.rows_count_val} x {self.cols_count_val}"
-            self.badge_label.text = f"{self.org} \u00b7 {self.level}"
-            raw_meas = data.get("measurements", {})
-            if not raw_meas:
-                return
-            self.measurements = {int(k): v for k, v in raw_meas.items()}
-            self.frontier_index = data.get("frontier_index", 0)
-            self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
-            self.current_index = self.frontier_index
-            self.row_widgets = {}
-            self.table_body.clear_widgets()
-            for idx in sorted(self.measurements.keys()):
-                self._render_row(idx)
-            self.measure_btn.disabled = False
-            self._update_active_label()
+            self._apply_session_dict(data)
         except Exception:
             pass  # bozuk/eksik kayit dosyasi uygulamayi cokertmesin
+
+    def _apply_session_dict(self, data):
+        """Bir oturum sozlugunu (ic otomatik kayittan VEYA kullanicinin
+        disaridan yukledigi bir yedek dosyadan) uygulamaya isler."""
+        self.org = data.get("org", self.org)
+        self.level = data.get("level", self.level)
+        self.rows_count_val = data.get("rows", self.rows_count_val)
+        self.cols_count_val = data.get("cols", self.cols_count_val)
+        self.project_info.update(data.get("project_info", {}))
+        self.fifa_info.update(data.get("fifa_info", {}))
+        self.report_language = data.get("report_language", self.report_language)
+        self.pi_ip = data.get("pi_ip", self.pi_ip)
+        self.pi_port = data.get("pi_port", self.pi_port)
+        self.grid_value_label.text = f"{self.rows_count_val} x {self.cols_count_val}"
+        self.badge_label.text = f"{self.org} \u00b7 {self.level}"
+        raw_meas = data.get("measurements", {})
+        self.measurements = {int(k): v for k, v in raw_meas.items()} if raw_meas else {}
+        self.frontier_index = data.get("frontier_index", 0)
+        self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
+        self.current_index = self.frontier_index
+        self.row_widgets = {}
+        self.table_body.clear_widgets()
+        for idx in sorted(self.measurements.keys()):
+            self._render_row(idx)
+        self.measure_btn.disabled = False
+        self._update_active_label()
 
     # --- Baglanti durumu kontrolu ---
     def _background_connection_check(self, dt):
@@ -635,7 +816,11 @@ class MeasureScreen(Screen):
         self.conn_strip.set_status(status)
 
     def _open_connection_settings(self):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(12))
+        content = PopupContent(padding=dp(18), spacing=dp(12))
+        _popup_title_lbl = Label(text="Baglanti Ayarlari", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
 
         row1 = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
         row1.add_widget(Label(text="Pi IP", font_size=sp(13), color=TEXT_MUTED, size_hint_x=0.3))
@@ -659,9 +844,9 @@ class MeasureScreen(Screen):
         result_label.bind(size=lambda i, v: setattr(i, "text_size", v))
         content.add_widget(result_label)
 
-        popup = Popup(title="Baglanti Ayarlari", content=content, size_hint=(0.88, 0.48),
+        popup = Popup(title="", content=content, size_hint=(0.88, 0.48),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
 
         def do_connect(*a):
             if connect_btn.disabled:
@@ -669,7 +854,7 @@ class MeasureScreen(Screen):
             new_ip = ip_input.text.strip()
             new_port_text = port_input.text.strip() or "8899"
             connect_btn.disabled = True
-            connect_btn.text = "Baglaniliyor..."
+            connect_spinner = TextSpinner(connect_btn, "Baglaniliyor...")
             result_label.text = ""
             self._conn_check_gen += 1  # bu, artik EN YENI istek - eski kontroller onu ezemez
             my_gen = self._conn_check_gen
@@ -685,6 +870,7 @@ class MeasureScreen(Screen):
                         self._fetch_lock.release()
 
                 def update(dt):
+                    connect_spinner.stop()
                     connect_btn.disabled = False
                     connect_btn.text = "Baglan"
 
@@ -741,7 +927,11 @@ class MeasureScreen(Screen):
 
     # --- Izgara duzenleme penceresi ---
     def _open_grid_editor(self):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
+        content = PopupContent(padding=dp(18), spacing=dp(14))
+        _popup_title_lbl = Label(text="Izgara Ayarlari", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
 
         row_box = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
         row_box.add_widget(Label(text="Satir", font_size=sp(14), color=TEXT_MUTED, size_hint_x=0.4))
@@ -764,9 +954,9 @@ class MeasureScreen(Screen):
         warn = Label(text="", font_size=sp(12.5), color=RED_TXT, size_hint_y=None, height=dp(18))
         content.add_widget(warn)
 
-        popup = Popup(title="Izgara Ayarlari", content=content, size_hint=(0.85, 0.52),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.52),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
@@ -806,15 +996,19 @@ class MeasureScreen(Screen):
         popup.open()
 
     def _confirm_grid_change(self, new_rows, new_cols):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(16))
+        content = PopupContent(padding=dp(18), spacing=dp(16))
+        _popup_title_lbl = Label(text="Izgara Boyutunu Degistir", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(
             text=f"Izgara boyutu {new_rows} x {new_cols} olarak degistirilecek.\n"
                  f"Mevcut {len(self.measurements)} olcum silinecek.\nEmin misiniz?",
             font_size=sp(14.5), color=TEXT, halign="center"))
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
-        popup = Popup(title="Izgara Boyutunu Degistir", content=content, size_hint=(0.85, 0.44),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.44),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
         confirm_btn = FlatButton(text="Evet, Degistir", bg_color=DANGER, font_size=sp(14))
         cancel_btn.bind(on_release=lambda b: popup.dismiss())
@@ -833,14 +1027,18 @@ class MeasureScreen(Screen):
         popup.open()
 
     def _confirm_reset(self):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(16))
+        content = PopupContent(padding=dp(18), spacing=dp(16))
+        _popup_title_lbl = Label(text="Sifirla", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(
             text="Tum olcum tablosu silinecek.\nBu islem geri alinamaz. Emin misiniz?",
             font_size=sp(15), color=TEXT, halign="center"))
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
-        popup = Popup(title="Sifirla", content=content, size_hint=(0.85, 0.4),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.4),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
         confirm_btn = FlatButton(text="Evet, Sil", bg_color=DANGER, font_size=sp(14))
         cancel_btn.bind(on_release=lambda b: popup.dismiss())
@@ -886,7 +1084,7 @@ class MeasureScreen(Screen):
         if self.current_index >= len(self.sequence):
             return
         self.measure_btn.disabled = True
-        self.measure_btn.text = "OLCUM ALINIYOR..."
+        self._measure_spinner = TextSpinner(self.measure_btn, "OLCUM ALINIYOR...")
         threading.Thread(target=self._do_measurement_fetch, daemon=True).start()
 
     def _do_measurement_fetch(self):
@@ -903,6 +1101,9 @@ class MeasureScreen(Screen):
         Clock.schedule_once(lambda dt: self._on_measurement_result(status, data), 0)
 
     def _on_measurement_result(self, status, data):
+        if getattr(self, "_measure_spinner", None):
+            self._measure_spinner.stop()
+            self._measure_spinner = None
         self._apply_connection_status(status)
         self.measure_btn.text = "OLCUM AL"
 
@@ -938,11 +1139,15 @@ class MeasureScreen(Screen):
         self.save_session()
 
     def _show_connection_error(self, message):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
+        content = PopupContent(padding=dp(18), spacing=dp(14))
+        _popup_title_lbl = Label(text="Baglanti Sorunu", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(text=message, font_size=sp(14), color=TEXT, halign="center"))
-        popup = Popup(title="Baglanti Sorunu", content=content, size_hint=(0.85, 0.42),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.42),
                        auto_dismiss=True, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         close_btn = FlatButton(text="Tamam", bg_color=ACCENT, font_size=sp(14),
                                 size_hint_y=None, height=dp(46))
         close_btn.bind(on_release=lambda b: popup.dismiss())
@@ -985,14 +1190,18 @@ class MeasureScreen(Screen):
         if not data:
             return
 
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(12))
+        content = PopupContent(padding=dp(18), spacing=dp(12))
+        _popup_title_lbl = Label(text="Nokta Islemleri", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(
             text=f"Grid No {point_index + 1}",
             font_size=sp(16), bold=True, color=TEXT, size_hint_y=None, height=dp(28)))
 
-        popup = Popup(title="Nokta Islemleri", content=content, size_hint=(0.85, 0.46),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.46),
                        auto_dismiss=True, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
 
         remeasure_btn = FlatButton(text="Bu Noktayi Yeniden Olc", bg_color=ACCENT,
                                     font_size=sp(14.5), size_hint_y=None, height=dp(50))
@@ -1022,14 +1231,18 @@ class MeasureScreen(Screen):
         popup.open()
 
     def _confirm_reset_point(self, point_index):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(16))
+        content = PopupContent(padding=dp(18), spacing=dp(16))
+        _popup_title_lbl = Label(text="Noktayi Sifirla", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(
             text=f"Grid No {point_index + 1} noktasinin olcumu sifirlanacak.\nEmin misiniz?",
             font_size=sp(15), color=TEXT, halign="center"))
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
-        popup = Popup(title="Noktayi Sifirla", content=content, size_hint=(0.85, 0.4),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.4),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
         confirm_btn = FlatButton(text="Evet, Sifirla", bg_color=DANGER, font_size=sp(14))
         cancel_btn.bind(on_release=lambda b: popup.dismiss())
@@ -1130,7 +1343,7 @@ class LevelCard(BoxLayout):
         self.extra_text = "\n".join([mcm_line, ff_line, rg_line, mf_line])
 
         self.expanded = False
-        self.toggle_label = Label(text="Tum Detaylar (MCM, FF, RG, MF)  v",
+        self.toggle_label = Label(text="Tum Detaylar (Bakim, Kamasma, Titresim..)  v",
                                    font_size=sp(11.5), color=ACCENT, bold=True,
                                    halign="left", valign="middle",
                                    text_size=(dp(288), dp(26)),
@@ -1152,10 +1365,10 @@ class LevelCard(BoxLayout):
     def _toggle_expand(self):
         self.expanded = not self.expanded
         if self.expanded:
-            self.toggle_label.text = "Tum Detaylar (MCM, FF, RG, MF)  ^"
+            self.toggle_label.text = "Tum Detaylar (Bakim, Kamasma, Titresim..)  ^"
             self.extra_label.text = self.extra_text
         else:
-            self.toggle_label.text = "Tum Detaylar (MCM, FF, RG, MF)  v"
+            self.toggle_label.text = "Tum Detaylar (Bakim, Kamasma, Titresim..)  v"
             self.extra_label.text = ""
             self.extra_label.height = 0
 
@@ -1185,6 +1398,10 @@ class LevelCard(BoxLayout):
 class StandardsScreen(Screen):
     def __init__(self, measure_screen, **kwargs):
         super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*BG)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._update_bg, size=self._update_bg)
         self.measure_screen = measure_screen
         self.browse_org = measure_screen.org
         self.preview_level = measure_screen.level
@@ -1199,7 +1416,7 @@ class StandardsScreen(Screen):
                                  size_hint_y=None, height=dp(54), padding=[dp(16), 0, dp(16), 0])
         active_row = BoxLayout()
         active_row.add_widget(Label(text="Aktif standart", font_size=sp(13),
-                                     color=(0.6, 0.85, 0.7, 1), size_hint_x=0.5))
+                                     color=SUCCESS, size_hint_x=0.5))
         self.active_label = Label(text=f"{measure_screen.org} · {measure_screen.level}",
                                    font_size=sp(15), bold=True, color=TEXT)
         active_row.add_widget(self.active_label)
@@ -1233,6 +1450,10 @@ class StandardsScreen(Screen):
         self.add_widget(root)
         self.set_browse_org(self.browse_org)
 
+    def _update_bg(self, *a):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
     def set_browse_org(self, org_name):
         self.browse_org = org_name
         for name, btn in self.org_buttons.items():
@@ -1265,14 +1486,18 @@ class StandardsScreen(Screen):
     def apply_standard(self, *a):
         if not self.preview_level:
             return
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(16))
+        content = PopupContent(padding=dp(18), spacing=dp(16))
+        _popup_title_lbl = Label(text="Standardi Uygula", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(
             text=f"Aktif standart\n{self.browse_org} - {self.preview_level}\nolarak degistirilecek. Emin misiniz?",
             font_size=sp(15), color=TEXT, halign="center"))
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
-        popup = Popup(title="Standardi Uygula", content=content, size_hint=(0.85, 0.42),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.42),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
         confirm_btn = FlatButton(text="Evet, Uygula", bg_color=ACCENT, font_size=sp(14))
         cancel_btn.bind(on_release=lambda b: popup.dismiss())
@@ -1310,19 +1535,15 @@ def compute_maur_failures(by_pos, threshold):
 
 
 def lux_color(value, vmin, vmax):
-    """DIALux/Relux tarzi 'false color' - dusuk deger mavi/mor, yuksek deger kirmizi/turuncu."""
+    """'False color' - dusuk deger sari, orta yesil, yuksek deger kirmizi."""
     if vmax <= vmin:
         t = 0.5
     else:
         t = (value - vmin) / (vmax - vmin)
     t = max(0.0, min(1.0, t))
     stops = [
-        (0.20, 0.20, 0.55, 1),   # koyu mor/lacivert (dusuk)
-        (0.15, 0.45, 0.80, 1),   # mavi
-        (0.20, 0.70, 0.65, 1),   # camgobegi
-        (0.30, 0.75, 0.30, 1),   # yesil
-        (0.90, 0.85, 0.20, 1),   # sari
-        (0.90, 0.45, 0.15, 1),   # turuncu
+        (0.90, 0.85, 0.20, 1),   # sari (dusuk)
+        (0.30, 0.75, 0.30, 1),   # yesil (orta)
         (0.85, 0.20, 0.20, 1),   # kirmizi (yuksek)
     ]
     n = len(stops) - 1
@@ -1354,6 +1575,39 @@ class TextureView(Widget):
         self.rect.size = self.size
 
 
+class ActivePointCell(FloatLayout):
+    """Su an olculecek AKTIF noktayi gosterir - henuz olculmemis olsa bile,
+    YANIP SONen bir cerceveyle dikkat ceker."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            self.fill_instr = Color(*ACCENT)
+            self.fill_instr.a = 0.22
+            self.bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[6])
+            self.border_instr = Color(*ACCENT)
+            self.border = Line(width=2.2)
+        self.bind(pos=self._update, size=self._update)
+        lbl = Label(text="-", font_size=sp(16), bold=True, color=ACCENT)
+        self.add_widget(lbl)
+        self.anim = Animation(a=0.15, duration=0.55) + Animation(a=0.85, duration=0.55)
+        self.anim.repeat = True
+        self.anim.start(self.border_instr)
+
+    def _update(self, *a):
+        self.bg.pos = self.pos
+        self.bg.size = self.size
+        self.border.rounded_rectangle = (self.x, self.y, self.width, self.height, 6)
+
+    def stop(self):
+        Animation.cancel_all(self.border_instr)
+
+
+class UnmeasuredCell(Label):
+    """Henuz olculmemis (ve su an aktif OLMAYAN) noktalar icin sabit, sonuk sembol."""
+    def __init__(self, **kwargs):
+        super().__init__(text="-", font_size=sp(15), bold=False, color=TEXT_MUTED, **kwargs)
+
+
 class ExtremeCell(BoxLayout):
     """En yuksek/en dusuk 3 degeri vurgulamak icin - kalin cerceve + kontrastli zemin."""
     def __init__(self, text, border_color, **kwargs):
@@ -1370,6 +1624,32 @@ class ExtremeCell(BoxLayout):
         self.bg.pos = self.pos
         self.bg.size = self.size
         self.border.rounded_rectangle = (self.x, self.y, self.width, self.height, 6)
+
+
+class CornerFlagCell(Widget):
+    """En yuksek/en dusuk 3 degeri SADE bir sekilde vurgular: kutu/cerceve YOK,
+    sadece kose ucgeni (kontur ile HER zeminde net gorunur) + normal renkte sayi."""
+    def __init__(self, text, cell_bg, accent_color, font_size=11.5, **kwargs):
+        super().__init__(**kwargs)
+        self.accent_color = accent_color
+        self.text_color = text_color_for_bg(cell_bg)
+        with self.canvas:
+            self.contour_instr = Color(*self.text_color)
+            self.contour_tri = Triangle()
+            self.flag_instr = Color(*accent_color)
+            self.flag_tri = Triangle()
+        self.bind(pos=self._update, size=self._update)
+        self.lbl = Label(text=text, font_size=sp(font_size), bold=True, color=self.text_color)
+        self.add_widget(self.lbl)
+
+    def _update(self, *a):
+        x, y, w, h = self.x, self.y, self.width, self.height
+        fs = w * 0.26
+        halo = fs * 1.35
+        self.contour_tri.points = [x + w - halo, y + h, x + w, y + h, x + w, y + h - halo]
+        self.flag_tri.points = [x + w - fs, y + h, x + w, y + h, x + w, y + h - fs]
+        self.lbl.pos = (x, y)
+        self.lbl.size = (w, h)
 
 
 class HeatCell(BoxLayout):
@@ -1396,6 +1676,10 @@ class ControlScreen(Screen):
 
     def __init__(self, measure_screen, **kwargs):
         super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*BG)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._update_bg, size=self._update_bg)
         self.measure_screen = measure_screen
         self.current_dataset = "Eh"
         self.zoom = 1.0
@@ -1403,7 +1687,7 @@ class ControlScreen(Screen):
         self.label_font_size = 12.5
 
         self.root_box = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
-        self.root_box.add_widget(Label(text="Kontrol Paneli", font_size=sp(20), bold=True,
+        self.root_box.add_widget(Label(text="Sonuc", font_size=sp(20), bold=True,
                                         color=TEXT, size_hint_y=None, height=dp(32)))
 
         # --- Veri seti secici (Eh / Ev0 / Ev90 / Ev180 / Ev270) ---
@@ -1437,7 +1721,9 @@ class ControlScreen(Screen):
         zoom_row.add_widget(zoom_out_btn)
         zoom_row.add_widget(self.zoom_label)
         zoom_row.add_widget(zoom_in_btn)
-        self.root_box.add_widget(zoom_row)
+        # NOT: zoom cubugu ARTIK EKRANDA GOSTERILMIYOR - parmakla (pinch) zoom
+        # yeterli hale geldigi icin kaldirildi. self.zoom_label internal takip
+        # icin hala var (goze gorunmez), diger kodlar bozulmasin diye.
 
         # --- Icerik alani (her sekmeye girildiginde yeniden kurulur) ---
         self.content_area = BoxLayout(orientation="vertical", spacing=dp(10),
@@ -1451,10 +1737,32 @@ class ControlScreen(Screen):
         self.add_widget(self.root_box)
         self._update_button_colors()
 
+    def _update_bg(self, *a):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
     def change_zoom(self, delta):
         self.zoom = max(0.5, min(2.6, round(self.zoom + delta, 2)))
         self.zoom_label.text = f"{int(self.zoom * 100)}%"
         self._build_heatmap()
+
+    def _on_scatter_scale(self, scatter, value):
+        """Scatter (Kivy'nin resmi pinch/zoom widget'i) her olcek degisiminde
+        bunu cagirir. Anlik geri bildirim (etiket) hemen guncellenir, ama
+        agir yeniden-cizim islemi, parmak biraktiktan ~0.3sn sonra (debounce)
+        TEK SEFERDE yapilir - boylece pinch sirasinda takilma olmaz."""
+        if value == 1.0:
+            return
+        new_zoom = max(0.5, min(2.6, round(self.zoom * value, 2)))
+        self.zoom_label.text = f"{int(new_zoom * 100)}%"
+        if getattr(self, "_pinch_debounce_ev", None):
+            self._pinch_debounce_ev.cancel()
+        self._pinch_debounce_ev = Clock.schedule_once(
+            lambda dt: self._finalize_pinch(new_zoom), 0.3)
+
+    def _finalize_pinch(self, new_zoom):
+        self.zoom = new_zoom
+        self._build_heatmap()  # yeni zoom ile KESKIN/net yeniden ciz
 
     def toggle_maur(self):
         self.maur_mode = not self.maur_mode
@@ -1482,7 +1790,34 @@ class ControlScreen(Screen):
     def on_pre_enter(self, *a):
         self._build_heatmap()
 
+    def on_leave(self, *a):
+        if getattr(self, "_active_cell", None):
+            self._active_cell.stop()
+        if getattr(self, "_pinch_debounce_ev", None):
+            self._pinch_debounce_ev.cancel()
+
     def _build_heatmap(self):
+        if getattr(self, "_active_cell", None):
+            self._active_cell.stop()
+        self._active_cell = None
+        # GORUNUMUN TAM ORTASININ, izgara icindeki (0-1) GORECELI konumunu
+        # hatirla - boylece yakinlastirinca/uzaklastirinca o nokta hep
+        # merkezde kalir (basit oransal kaydirma, ic buyuklukler cok
+        # degistiginde koseye sacma bir kaymaya yol aciyordu).
+        center_frac_x, center_frac_y = 0.5, 0.5
+        had_previous_scroll = False
+        old_scroll = getattr(self, "_heatmap_scroll", None)
+        old_size = getattr(self, "_last_display_size", None)
+        if old_scroll and old_size and old_scroll.width > 0:
+            had_previous_scroll = True
+            old_w, old_h = old_size
+            vp_w, vp_h = old_scroll.width, old_scroll.height
+            scrollable_w = max(old_w - vp_w, 0.001)
+            scrollable_h = max(old_h - vp_h, 0.001)
+            center_x_px = old_scroll.scroll_x * scrollable_w + vp_w / 2
+            center_y_px = old_scroll.scroll_y * scrollable_h + vp_h / 2
+            center_frac_x = max(0.0, min(1.0, center_x_px / old_w))
+            center_frac_y = max(0.0, min(1.0, center_y_px / old_h))
         self.content_area.clear_widgets()
         ms = self.measure_screen
         satir_n, sutun_n = ms.rows_count_val, ms.cols_count_val
@@ -1509,8 +1844,9 @@ class ControlScreen(Screen):
         disp_cols = satir_n   # ekranda yatayda kac hucre (az sayida olur)
         disp_rows = sutun_n   # ekranda dikeyde kac hucre (cok sayida olur)
 
-        cell_size = self.base_cell_size * self.zoom
-        display_w, display_h = cell_size * disp_cols, cell_size * disp_rows
+        cell_h = self.base_cell_size * self.zoom
+        cell_w = cell_h * 1.4  # dikdortgen hucreler - kare degil
+        display_w, display_h = cell_w * disp_cols, cell_h * disp_rows
 
         # --- Yumuşak gradyanli doku (texture) olustur ---
         texture = Texture.create(size=(disp_cols, disp_rows), colorfmt="rgba")
@@ -1526,7 +1862,7 @@ class ControlScreen(Screen):
             for tex_col in range(disp_cols):
                 r = tex_col  # yatay konum = satir indeksi (r=0 SOLDA)
                 val = by_pos.get((r, c))
-                color = lux_color(val, vmin, vmax) if val is not None else (0.16, 0.16, 0.18, 1)
+                color = lux_color(val, vmin, vmax) if val is not None else CARD_LIGHT
                 idx = (tex_row * disp_cols + tex_col) * 4
                 buf[idx:idx + 4] = bytes(int(max(0.0, min(1.0, ch)) * 255) for ch in color)
         texture.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
@@ -1536,10 +1872,21 @@ class ControlScreen(Screen):
                            size_hint=(None, None))
         heat_container.add_widget(img)
 
+        # --- YENI: ince izgara cizgileri - hangi sayinin hangi hucreye ait
+        #     oldugunu net gostermek icin (canvas.after -> her seyin USTUNDE cizilir) ---
+        with heat_container.canvas.after:
+            Color(*BORDER)
+            for gi in range(disp_cols + 1):
+                gx = gi * cell_w
+                Line(points=[gx, 0, gx, display_h], width=1.3)
+            for gj in range(disp_rows + 1):
+                gy = gj * cell_h
+                Line(points=[0, gy, display_w, gy], width=1.3)
+
         def cell_pos(r, c):
             """Bir (satir, sutun) noktasinin ekran pikseli - yukaridaki ile ayni mantik."""
-            x = r * cell_size
-            y = (disp_rows - 1 - c) * cell_size
+            x = r * cell_w
+            y = (disp_rows - 1 - c) * cell_h
             return (x, y)
 
         # --- MAUR hesaplamasi (hucre vurgulamasindan ONCE yapilmali) ---
@@ -1556,8 +1903,8 @@ class ControlScreen(Screen):
         # --- Sayilari resmin ustune bindir ---
         # MAUR modu ACIKKEN: min/maks vurgusu YOK, sadece MAUR hatasi olan noktalar isaretlenir.
         # MAUR modu KAPALIYKEN: normal en yuksek/dusuk 3 deger vurgusu.
-        MIN_COLOR = (0.35, 0.65, 1, 1)     # mavi - en dusuk degerler (sadece normal modda)
-        MAX_COLOR = (1, 0.35, 0.35, 1)     # kirmizi - en yuksek degerler (sadece normal modda)
+        MIN_COLOR = (0.30, 0.55, 0.95, 1)   # mavi - en dusuk degerler (sadece normal modda)
+        MAX_COLOR = (0.90, 0.25, 0.25, 1)   # kirmizi - en yuksek degerler (sadece normal modda)
         MAUR_FAIL_COLOR = (1, 0.60, 0.0, 1)  # turuncu - MAUR hatali nokta
 
         if self.maur_mode:
@@ -1573,25 +1920,48 @@ class ControlScreen(Screen):
             pos = cell_pos(r, c)
             if self.maur_mode and (r, c) in maur_failing_points:
                 cell = ExtremeCell(str(val), MAUR_FAIL_COLOR,
-                                    size_hint=(None, None), size=(cell_size, cell_size))
+                                    size_hint=(None, None), size=(cell_w, cell_h))
                 cell.pos = pos
                 heat_container.add_widget(cell)
             elif (r, c) in lowest_keys:
-                cell = ExtremeCell(str(val), MIN_COLOR,
-                                    size_hint=(None, None), size=(cell_size, cell_size))
+                cell_bg = lux_color(val, vmin, vmax)
+                cell = CornerFlagCell(str(val), cell_bg, MIN_COLOR, font_size=self.label_font_size,
+                                       size_hint=(None, None), size=(cell_w, cell_h))
                 cell.pos = pos
                 heat_container.add_widget(cell)
             elif (r, c) in highest_keys:
-                cell = ExtremeCell(str(val), MAX_COLOR,
-                                    size_hint=(None, None), size=(cell_size, cell_size))
+                cell_bg = lux_color(val, vmin, vmax)
+                cell = CornerFlagCell(str(val), cell_bg, MAX_COLOR, font_size=self.label_font_size,
+                                       size_hint=(None, None), size=(cell_w, cell_h))
                 cell.pos = pos
                 heat_container.add_widget(cell)
             else:
+                cell_bg = lux_color(val, vmin, vmax)
                 lbl = Label(text=str(val), font_size=sp(self.label_font_size), bold=True,
-                            color=(1, 1, 1, 1),
-                            size_hint=(None, None), size=(cell_size, cell_size))
+                            color=text_color_for_bg(cell_bg),
+                            size_hint=(None, None), size=(cell_w, cell_h))
                 lbl.pos = pos
                 heat_container.add_widget(lbl)
+
+        # --- YENI: aktif (siradaki) nokta YANIP SONsun, digerleri sonuk sembol gostersin ---
+        active_pos = None
+        if ms.current_index < len(ms.sequence):
+            ap_r, ap_c = ms.sequence[ms.current_index]
+            if (ap_r, ap_c) not in by_pos:
+                active_pos = (ap_r, ap_c)
+
+        for r in range(satir_n):
+            for c in range(sutun_n):
+                if (r, c) in by_pos:
+                    continue  # zaten yukarida cizildi
+                pos = cell_pos(r, c)
+                if (r, c) == active_pos:
+                    cell = ActivePointCell(size_hint=(None, None), size=(cell_w, cell_h))
+                    self._active_cell = cell
+                else:
+                    cell = UnmeasuredCell(size_hint=(None, None), size=(cell_w, cell_h))
+                cell.pos = pos
+                heat_container.add_widget(cell)
 
         # --- MAUR gorunumu: hatali komsuluklari BAGLANTI CIZGISIYLE de isaretle ---
         if self.maur_mode and maur_threshold is not None:
@@ -1602,16 +1972,62 @@ class ControlScreen(Screen):
                     Color(0.88, 0.28, 0.25, 1)
                     if c1 == c2:  # r farkli -> ekranda YATAY komsuluk -> dikey bar
                         bar_w = dp(4)
-                        Rectangle(pos=(p1[0] + cell_size - bar_w / 2, p1[1]),
-                                  size=(bar_w, cell_size))
+                        Rectangle(pos=(p1[0] + cell_w - bar_w / 2, p1[1]),
+                                  size=(bar_w, cell_h))
                     else:  # c farkli -> ekranda DIKEY komsuluk -> yatay bar
                         bar_h = dp(4)
-                        Rectangle(pos=(p1[0], p1[1] - bar_h / 2), size=(cell_size, bar_h))
+                        Rectangle(pos=(p1[0], p1[1] - bar_h / 2), size=(cell_w, bar_h))
                 heat_container.add_widget(marker)
+
+        # --- YENI: her hucrenin icinde, dokunmaya GEREK KALMADAN her zaman
+        #     gorunen KUCUK ve SONUK bir "Grid No X" etiketi ---
+        pos_to_gridno = {rc: idx + 1 for idx, rc in enumerate(ms.sequence)}
+        gridno_font_size = max(7, self.label_font_size * 0.6)
+        for r in range(satir_n):
+            for c in range(sutun_n):
+                grid_no = pos_to_gridno.get((r, c))
+                if grid_no is None:
+                    continue
+                val = by_pos.get((r, c))
+                tag_bg = lux_color(val, vmin, vmax) if val is not None else CARD_LIGHT
+                base_color = text_color_for_bg(tag_bg)
+                tag_color = (base_color[0], base_color[1], base_color[2], 0.55)
+                pos = cell_pos(r, c)
+                tag = Label(text=str(grid_no), font_size=sp(gridno_font_size), bold=False,
+                            color=tag_color, size_hint=(None, None), size=(cell_w, cell_h),
+                            halign="left", valign="top",
+                            text_size=(cell_w - dp(4), cell_h - dp(2)))
+                tag.pos = pos
+                heat_container.add_widget(tag)
+
+        # --- Parmakla zoom (pinch): Kivy'nin KENDI Scatter widget'i, sadece
+        #     olcekleme icin (cevirme/donme kapali) - tek parmak kaydirma
+        #     ScrollView'e dokunulmadan normal calismaya devam eder ---
+        pinch_scatter = Scatter(do_rotation=False, do_translation=False, do_scale=True,
+                                 scale_min=0.5 / max(self.zoom, 0.01),
+                                 scale_max=2.6 / max(self.zoom, 0.01),
+                                 size=(display_w, display_h), size_hint=(None, None))
+        pinch_scatter.add_widget(heat_container)
+        pinch_scatter.bind(scale=self._on_scatter_scale)
+        self._active_scatter = pinch_scatter
 
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
                              bar_width=dp(6))
-        scroll.add_widget(heat_container)
+        scroll.add_widget(pinch_scatter)
+        self._heatmap_scroll = scroll
+        self._last_display_size = (display_w, display_h)
+
+        def _restore_scroll(dt):
+            if not had_previous_scroll:
+                return  # ilk acilista Kivy'nin dogal varsayilanini (ust-sol) koru
+            vp_w, vp_h = scroll.width, scroll.height
+            scrollable_w = max(display_w - vp_w, 0.001)
+            scrollable_h = max(display_h - vp_h, 0.001)
+            target_x_px = center_frac_x * display_w
+            target_y_px = center_frac_y * display_h
+            scroll.scroll_x = max(0.0, min(1.0, (target_x_px - vp_w / 2) / scrollable_w))
+            scroll.scroll_y = max(0.0, min(1.0, (target_y_px - vp_h / 2) / scrollable_h))
+        Clock.schedule_once(_restore_scroll, 0)
 
         # --- Yon etiketleri (UEFA/FIFA yon tanimlamasi: Grid No 1 sol-ustte,
         #     ust=270, sag=0, alt=90, sol=180) ---
@@ -1677,7 +2093,7 @@ class ControlScreen(Screen):
 
                 fail_count = len(maur_failures)
                 maur_ok = fail_count <= maur_max_fail
-                verdict_card = Card(bg_color=SUCCESS_TINT if maur_ok else (0.22, 0.09, 0.10, 1),
+                verdict_card = Card(bg_color=SUCCESS_TINT if maur_ok else DANGER_TINT,
                                      radius=14, border_color=SUCCESS if maur_ok else DANGER,
                                      size_hint_y=None, height=dp(50),
                                      padding=[dp(16), 0, dp(16), 0])
@@ -1688,7 +2104,7 @@ class ControlScreen(Screen):
                 verdict_row.add_widget(Label(
                     text="UYGUN" if maur_ok else "UYGUN DEGIL",
                     font_size=sp(14), bold=True,
-                    color=(0.6, 0.9, 0.7, 1) if maur_ok else (1, 0.6, 0.6, 1)))
+                    color=GREEN_TXT if maur_ok else RED_TXT))
                 verdict_card.add_widget(verdict_row)
                 self.content_area.add_widget(verdict_card)
 
@@ -1712,14 +2128,20 @@ class ControlScreen(Screen):
             bar.add_widget(swatch)
         legend_card.add_widget(bar)
         minmax_row = BoxLayout(size_hint_y=None, height=dp(16))
-        min_lbl = Label(text=f"{vmin:.0f}", font_size=sp(11), color=TEXT_MUTED,
-                        halign="left", valign="middle")
-        min_lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
-        max_lbl = Label(text=f"{vmax:.0f}", font_size=sp(11), color=TEXT_MUTED,
-                        halign="right", valign="middle")
-        max_lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
-        minmax_row.add_widget(min_lbl)
-        minmax_row.add_widget(max_lbl)
+        n_ticks = 5
+        for i in range(n_ticks):
+            t = i / (n_ticks - 1)
+            tick_val = vmin + t * (vmax - vmin)
+            if i == 0:
+                halign = "left"
+            elif i == n_ticks - 1:
+                halign = "right"
+            else:
+                halign = "center"
+            tick_lbl = Label(text=f"{tick_val:.0f}", font_size=sp(10.5), color=TEXT_MUTED,
+                              halign=halign, valign="middle")
+            tick_lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+            minmax_row.add_widget(tick_lbl)
         legend_card.add_widget(minmax_row)
         self.content_area.add_widget(legend_card)
 
@@ -1767,6 +2189,10 @@ class ReportScreen(Screen):
 
     def __init__(self, measure_screen, **kwargs):
         super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*BG)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._update_bg, size=self._update_bg)
         self.measure_screen = measure_screen
 
         self.root_box = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
@@ -1782,19 +2208,245 @@ class ReportScreen(Screen):
 
         self.add_widget(self.root_box)
 
+    def _update_bg(self, *a):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
     def on_pre_enter(self, *a):
         self._build_report()
 
     def _show_message_popup(self, title, message):
-        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
+        content = PopupContent(padding=dp(18), spacing=dp(14))
+        _popup_title_lbl = Label(text=title, font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
         content.add_widget(Label(text=message, font_size=sp(13.5), color=TEXT, halign="center"))
-        popup = Popup(title=title, content=content, size_hint=(0.85, 0.4),
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.4),
                        auto_dismiss=True, separator_color=BORDER, title_color=TEXT,
-                       background_color=(0.08, 0.08, 0.10, 1))
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         close_btn = FlatButton(text="Tamam", bg_color=ACCENT, font_size=sp(14),
                                 size_hint_y=None, height=dp(46))
         close_btn.bind(on_release=lambda b: popup.dismiss())
         content.add_widget(close_btn)
+        popup.open()
+
+    def export_data_json(self):
+        ms = self.measure_screen
+        try:
+            data = ms._build_session_dict()
+            fname = f"aydinlatma_veri_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            fpath = os.path.join(self._export_dir(), fname)
+            with open(fpath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            final_location = self._publish_to_downloads(fpath, fname, "application/json")
+            self._show_message_popup("Veri Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+        except Exception as e:
+            self._show_message_popup("Disa Aktarma Hatasi", f"Bir sorun olustu:\n{e}")
+
+    def _finish_import(self, data):
+        ms = self.measure_screen
+        try:
+            ms._apply_session_dict(data)
+            ms.save_session()
+            self._build_report()
+            self._show_message_popup("Ice Aktarildi", "Veriler basariyla yuklendi.")
+        except Exception as e:
+            self._show_message_popup("Ice Aktarma Hatasi", f"Veri islenemedi:\n{e}")
+
+    def import_data_json(self):
+        """Android'de yerlesik dosya secici ile bir .json yedegini geri yukler.
+        Android disinda (masaustu test) basit bir dosya-yolu girisine duser."""
+        try:
+            from jnius import autoclass
+            from android import activity as android_activity  # sadece APK icinde var
+            Intent = autoclass("android.content.Intent")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            REQUEST_CODE = 4242
+
+            def on_activity_result(request_code, result_code, intent):
+                if request_code != REQUEST_CODE:
+                    return
+                try:
+                    if intent is None:
+                        return
+                    uri = intent.getData()
+                    if uri is None:
+                        return
+                    resolver = activity.getContentResolver()
+                    input_stream = resolver.openInputStream(uri)
+                    BufferedReader = autoclass("java.io.BufferedReader")
+                    InputStreamReader = autoclass("java.io.InputStreamReader")
+                    reader = BufferedReader(InputStreamReader(input_stream))
+                    lines = []
+                    line = reader.readLine()
+                    while line is not None:
+                        lines.append(line)
+                        line = reader.readLine()
+                    reader.close()
+                    content = "\n".join(lines)
+                    data = json.loads(content)
+                    Clock.schedule_once(lambda dt: self._finish_import(data), 0)
+                except Exception as e:
+                    Clock.schedule_once(lambda dt, e=e: self._show_message_popup(
+                        "Ice Aktarma Hatasi", f"Dosya okunamadi:\n{e}"), 0)
+                finally:
+                    android_activity.unbind(on_activity_result=on_activity_result)
+
+            android_activity.bind(on_activity_result=on_activity_result)
+
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("application/json")
+            activity.startActivityForResult(intent, REQUEST_CODE)
+        except Exception:
+            self._import_via_text_fallback()
+
+    def _import_via_text_fallback(self):
+        content = PopupContent(padding=dp(18), spacing=dp(12))
+        title = Label(text="Dosyadan Ice Aktar", font_size=sp(16), bold=True, color=TEXT,
+                      size_hint_y=None, height=dp(28))
+        content.add_widget(title)
+        info = Label(text="Dosya yolunu girin:", font_size=sp(12), color=TEXT_MUTED,
+                     size_hint_y=None, height=dp(20), halign="left")
+        info.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(info)
+        fc = Card(bg_color=CARD_LIGHT, radius=8, size_hint_y=None, height=dp(40))
+        ti = ThemedTextInput(text="", multiline=False, font_size=sp(12.5))
+        fc.add_widget(ti)
+        content.add_widget(fc)
+
+        popup = Popup(title="", content=content, size_hint=(0.9, None), height=dp(220),
+                       auto_dismiss=True, background_color=(0, 0, 0, 0), background='',
+                       separator_height=0, title_size=0)
+
+        def do_import(*a):
+            path = ti.text.strip()
+            popup.dismiss()
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._finish_import(data)
+            except Exception as e:
+                self._show_message_popup("Ice Aktarma Hatasi", f"Dosya okunamadi:\n{e}")
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
+        cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(13))
+        cancel_btn.bind(on_release=lambda b: popup.dismiss())
+        ok_btn = FlatButton(text="Yukle", bg_color=SUCCESS, font_size=sp(13), bold=True)
+        ok_btn.bind(on_release=do_import)
+        btn_row.add_widget(cancel_btn)
+        btn_row.add_widget(ok_btn)
+        content.add_widget(btn_row)
+        popup.open()
+
+    def _toggle_report_language(self):
+        ms = self.measure_screen
+        ms.report_language = "en" if ms.report_language == "tr" else "tr"
+        self.lang_btn.text = "Turkce" if ms.report_language == "tr" else "English"
+        ms.save_session()
+
+    def _open_fifa_info_popup(self):
+        ms = self.measure_screen
+        content = PopupContent(padding=dp(16), spacing=dp(10))
+        title = Label(text="FIFA Rapor Bilgileri", font_size=sp(17), bold=True, color=TEXT,
+                       size_hint_y=None, height=dp(28))
+        content.add_widget(title)
+
+        scroll = ScrollView(size_hint=(1, 1))
+        form = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10),
+                          padding=[0, dp(4), 0, dp(4)])
+        form.bind(minimum_height=form.setter("height"))
+
+        inputs = {}
+
+        def section(text):
+            lbl = Label(text=text, font_size=sp(12), bold=True, color=ACCENT,
+                        size_hint_y=None, height=dp(24), halign="left", valign="middle")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            form.add_widget(lbl)
+
+        def field(label_text, key):
+            lbl = Label(text=label_text, font_size=sp(12), color=TEXT_MUTED,
+                        size_hint_y=None, height=dp(18), halign="left", valign="bottom")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            form.add_widget(lbl)
+            fc = Card(bg_color=CARD_LIGHT, radius=8, size_hint_y=None, height=dp(40))
+            ti = ThemedTextInput(text=ms.fifa_info.get(key, ""), multiline=False, font_size=sp(13))
+            inputs[key] = ti
+            fc.add_widget(ti)
+            form.add_widget(fc)
+
+        def readonly_row(label_text, value_text):
+            lbl = Label(text=label_text, font_size=sp(12), color=TEXT_MUTED,
+                        size_hint_y=None, height=dp(18), halign="left", valign="bottom")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            form.add_widget(lbl)
+            val = Label(text=value_text, font_size=sp(12.5), color=TEXT, bold=True,
+                        size_hint_y=None, halign="left", valign="top")
+            val.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+            val.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1] + dp(4)))
+            form.add_widget(val)
+
+        section("GENEL")
+        field("Saha Genisligi (m)", "pitch_width")
+        field("Saha Uzunlugu (m)", "pitch_length")
+
+        section("LUMINAIRE")
+        field("Uretici", "lum1_manufacturer")
+        field("Model", "lum1_model")
+
+        section("OLCUM CIHAZI")
+        readonly_row("Cihaz", METER_MODEL)
+        readonly_row("Seri No", METER_SERIAL)
+        readonly_row("Alici Kafa No.0 Seri No", PROBE_SERIALS["Eh"])
+        readonly_row("Alici Kafa No.1 Seri No", PROBE_SERIALS["Ev0"])
+        readonly_row("Alici Kafa No.2 Seri No", PROBE_SERIALS["Ev90"])
+        readonly_row("Alici Kafa No.3 Seri No", PROBE_SERIALS["Ev180"])
+        readonly_row("Alici Kafa No.4 Seri No", PROBE_SERIALS["Ev270"])
+        field("Kalibrasyon Tarihi", "cal_date")
+
+        section("RENK OLCER (varsa)")
+        field("Kullanilan Cihaz", "colour_meter")
+        field("Seri No", "colour_meter_serial")
+        field("Kalibrasyon Tarihi", "colour_meter_cal_date")
+
+        section("KURULUS BILGILERI (sabit)")
+        readonly_row("Kurulus", ORG_NAME)
+        readonly_row("Adres", ORG_ADDRESS)
+        readonly_row("Telefon / E-posta", ORG_PHONE_EMAIL)
+        readonly_row("Denetleyen", INSPECTOR_NAME)
+
+        section("EK OLCUMLER (varsa)")
+        field("Ort. Flicker Faktoru", "flicker_avg")
+        field("Maks. Flicker Faktoru", "flicker_max")
+        field("Renk Sicakligi (Tc)", "colour_temp_tc")
+        field("Renk Gosterimi (Ra)", "colour_rendering_ra")
+        field("Kamasma Orani (Rg)", "glare_rating_rg")
+
+        scroll.add_widget(form)
+        content.add_widget(scroll)
+
+        popup = Popup(title="", content=content, size_hint=(0.92, 0.85),
+                       auto_dismiss=False, background_color=(0, 0, 0, 0), background='',
+                       separator_height=0, title_size=0)
+
+        def do_save(*a):
+            for key, ti in inputs.items():
+                ms.fifa_info[key] = ti.text.strip()
+            ms.save_session()
+            popup.dismiss()
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
+        cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(13))
+        cancel_btn.bind(on_release=lambda b: popup.dismiss())
+        save_btn = FlatButton(text="Kaydet", bg_color=SUCCESS, font_size=sp(13), bold=True)
+        save_btn.bind(on_release=do_save)
+        btn_row.add_widget(cancel_btn)
+        btn_row.add_widget(save_btn)
+        content.add_widget(btn_row)
+
         popup.open()
 
     def _export_dir(self):
@@ -1883,101 +2535,560 @@ class ReportScreen(Screen):
                 f"'fpdf2' kutuphanesi yuklenemedi.\n\nTeknik detay:\n{type(e).__name__}: {e}")
             return
 
+        lang = self.measure_screen.report_language if hasattr(self.measure_screen, "report_language") else "tr"
+
+        TXT = {
+            "cover_title": ("AYDINLATMA \u00d6L\u00c7\u00dcM RAPORU", "ILLUMINANCE MEASUREMENT REPORT"),
+            "cover_subtitle": ("Ayd\u0131nlatma \u00d6l\u00e7\u00fcm Raporu", "Illuminance Measurement Report"),
+            "date_label": ("\u00d6l\u00e7\u00fcm Tarihi", "Measurement Date"),
+            "standard_label": ("Kar\u015f\u0131la\u015ft\u0131r\u0131lan Standart", "Standard Compared"),
+            "prepared_by_label": ("Haz\u0131rlayan", "Prepared By"),
+            "report_created": ("Rapor olu\u015fturma tarihi", "Report generated on"),
+            "fifa_cover_title": ("Aydınlatma Test Raporu", "Lighting Test Report"),
+            "fifa_summary_title": ("Lighting - Sonu\u00e7 \u00d6zeti", "Lighting - Summary of Results"),
+            "name_of_stadium": ("Stadyum Ad\u0131", "Name of Stadium"),
+            "city_location": ("\u015eehir / Konum", "City / Location"),
+            "date_of_inspection": ("Denetim Tarihi", "Date of Inspection"),
+            "luminaire": ("Ayd\u0131nlatma Armat\u00fcr\u00fc", "Luminaire"),
+            "manufacturer": ("\u00dcretici", "Manufacturer"),
+            "model_product_type": ("Model / \u00dcr\u00fcn Tipi", "Model / Product Type"),
+            "illuminance_meter_used": ("Kullan\u0131lan Ayd\u0131nl\u0131k \u015eiddeti \u00d6l\u00e7er", "Illuminance Meter Used"),
+            "serial_illuminance_meter": ("\u00d6l\u00e7er Seri No", "Serial Number of Illuminance Meter"),
+            "calibration_date": ("Kalibrasyon Tarihi", "Calibration Date"),
+            "probe_serial": ("Al\u0131c\u0131 Kafa No.{n} Seri No", "Probe Head No.{n} Serial No"),
+            "colour_meter_used": ("Kullan\u0131lan Renk \u00d6l\u00e7er", "Colour Meter Used"),
+            "serial_colour_meter": ("Renk \u00d6l\u00e7er Seri No", "Serial Number of Colour Meter"),
+            "pitch_measurements": ("Saha \u00d6l\u00e7\u00fcleri", "Pitch Measurements"),
+            "width": ("(geni\u015flik)", "(width)"),
+            "length": ("(uzunluk)", "(length)"),
+            "organisation_inspecting": ("Denetleyen Kurulu\u015f", "Organisation Inspecting"),
+            "address": ("Adres", "Address"),
+            "telephone_email": ("Telefon Numaras\u0131 ve E-posta Adresi", "Telephone Number & Email Address"),
+            "inspection_by": ("Denetleyen (Ad)", "Inspection By (Name)"),
+            "signature": ("\u0130mza", "Signature"),
+            "stadium_name_location": ("Stadyum Ad\u0131 ve Konumu", "Stadium Name & Location"),
+            "test_date": ("Test Tarihi", "Test Date"),
+            "vertical_plane": ("Dikey Referans D\u00fczlemi", "Vertical Reference Plane"),
+            "horizontal_plane": ("Yatay D\u00fczlem", "Horizontal Plane"),
+            "ev_min": ("Ev min", "Ev min"),
+            "ev_max": ("Ev maks", "Ev max"),
+            "ev_ave": ("Ev ort", "Ev ave"),
+            "uniformity_u1v": ("D\u00fczg\u00fcnl\u00fck U1v", "Uniformity U1v"),
+            "uniformity_u2v": ("D\u00fczg\u00fcnl\u00fck U2v", "Uniformity U2v"),
+            "maur_fails": ("MAUR hata say\u0131s\u0131", "MAUR fails"),
+            "eh_min": ("Eh min", "Eh min"),
+            "eh_max": ("Eh maks", "Eh max"),
+            "eh_ave": ("Eh ort", "Eh ave"),
+            "uniformity_u1h": ("D\u00fczg\u00fcnl\u00fck U1h", "Uniformity U1h"),
+            "uniformity_u2h": ("D\u00fczg\u00fcnl\u00fck U2h", "Uniformity U2h"),
+            "maur_horizontal_fails": ("MAUR yatay hata say\u0131s\u0131", "MAUR horizontal fails"),
+            "other_measurements": ("Di\u011fer \u00d6l\u00e7\u00fcmler", "Other Measurements"),
+            "avg_flicker": ("Ortalama Flicker Fakt\u00f6r\u00fc", "Average Flicker Factor"),
+            "max_flicker": ("Maksimum Flicker Fakt\u00f6r\u00fc", "Maximum Flicker Factor"),
+            "colour_temp": ("Renk S\u0131cakl\u0131\u011f\u0131 (Tc)", "Colour Temperature (Tc)"),
+            "colour_rendering": ("Renk G\u00f6sterimi (Ra)", "Colour Rendering (Ra)"),
+            "glare_rating": ("Kama\u015fma Oran\u0131 (Rg)", "Glare Rating (Rg)"),
+            "detailed_report_title": ("DETAYLI UYGUNLUK RAPORU", "DETAILED COMPLIANCE REPORT"),
+            "facility": ("Stadyum/Tesis", "Stadium/Facility"),
+            "country_city": ("\u00dclke / \u015eehir", "Country / City"),
+            "grid": ("Izgara", "Grid"),
+            "measured": ("\u00d6l\u00e7\u00fclen", "Measured"),
+            "meets_criteria": ("KR\u0130TERLER\u0130 KAR\u015eILIYOR", "MEETS CRITERIA"),
+            "fails_criteria": ("KR\u0130TERLER\u0130 KAR\u015eILAMIYOR", "DOES NOT MEET CRITERIA"),
+            "criterion": ("Kriter", "Criterion"),
+            "reference": ("Referans", "Reference"),
+            "measured_col": ("\u00d6l\u00e7\u00fclen", "Measured"),
+            "result": ("Sonu\u00e7", "Result"),
+            "compliant": ("UYGUN", "COMPLIANT"),
+            "non_compliant": ("UYGUN DE\u011e\u0130L", "NON-COMPLIANT"),
+            "avg_gt": ("Ortalama >", "Average >"),
+            "min_gt": ("Minimum >", "Minimum >"),
+            "uniformity_u1": ("D\u00fczg\u00fcnl\u00fck U1", "Uniformity U1"),
+            "uniformity_u2": ("D\u00fczg\u00fcnl\u00fck U2", "Uniformity U2"),
+            "horizontal_eh": ("Yatay (Eh)", "Horizontal (Eh)"),
+            "vertical_deg": ("Dikey {deg}", "Vertical {deg}"),
+            "maur_title": ("MAUR - Kom\u015fu Nokta D\u00fczg\u00fcnl\u00fc\u011f\u00fc", "MAUR - Adjacent Point Uniformity"),
+            "maur_not_specified": ("Bu standart seviyesi i\u00e7in MAUR belirtilmemi\u015f.",
+                                   "MAUR is not specified for this standard level."),
+            "threshold_ratio": ("E\u015fik oran", "Threshold ratio"),
+            "total_fails": ("Toplam hata (5 d\u00fczlem)", "Total fails (5 planes)"),
+            "allowed": ("izin verilen", "allowed"),
+            "no_maur_fails": ("Hi\u00e7bir d\u00fczlemde MAUR e\u015fi\u011fini a\u015fan kom\u015fu nokta \u00e7ifti bulunamad\u0131.",
+                              "No adjacent point pairs exceeding the MAUR threshold were found in any plane."),
+            "faulty_pairs": ("hatal\u0131 \u00e7ift", "faulty pairs"),
+            "point_pair": ("Nokta \u00c7ifti", "Point Pair"),
+            "value1": ("De\u011fer 1 (lx)", "Value 1 (lx)"),
+            "value2": ("De\u011fer 2 (lx)", "Value 2 (lx)"),
+            "ratio": ("Oran", "Ratio"),
+            "raw_data_title": ("Ham \u00d6l\u00e7\u00fcm Verileri", "Raw Measurement Data"),
+            "grid_no": ("Grid No", "Grid No"),
+            "heatmap_title": ("Is\u0131 Haritas\u0131", "Heat Map"),
+            "average": ("Ortalama", "Average"),
+            "minimum": ("Minimum", "Minimum"),
+            "maximum": ("Maksimum", "Maximum"),
+            "uniformity_u1_short": ("D\u00fczg\u00fcnl\u00fck U1", "Uniformity U1"),
+            "uniformity_u2_short": ("D\u00fczg\u00fcnl\u00fck U2", "Uniformity U2"),
+            "page": ("Sayfa", "Page"),
+            "pdf_saved": ("PDF Kaydedildi", "PDF Saved"),
+            "file_saved": ("Dosya kaydedildi", "File saved"),
+            "pdf_error": ("PDF Hatas\u0131", "PDF Error"),
+            "pdf_error_msg": ("PDF olu\u015fturulurken bir sorun olu\u015ftu", "An error occurred while creating the PDF"),
+        }
+
+        def t(key, **kwargs):
+            val = TXT[key][0] if lang == "tr" else TXT[key][1]
+            return val.format(**kwargs) if kwargs else val
+
+        BRAND = (41, 82, 130)       # ana marka mavisi (kurumsal)
+        BRAND_TINT = (219, 229, 241)  # acik mavi zemin tonu (tablo basliklari)
+        GOOD = (20, 130, 60)
+        BAD = (180, 30, 30)
+        MUTED = (120, 120, 128)
+        MIN_MARK = (60, 130, 220)   # isi haritasinda en dusuk 3 deger - mavi kose
+        MAX_MARK = (210, 60, 55)    # isi haritasinda en yuksek 3 deger - kirmizi kose
+
+        # Bizim ic verimizdeki (uygulama arayuzuyle ORTAK) sabit Turkce etiketleri
+        # PDF ciktisinda secilen dile cevirmek icin kucuk bir eslesme tablosu -
+        # boylece uygulamanin kendi ekranlari (Rapor sekmesi) HIC etkilenmiyor,
+        # sadece PDF ciktisi degisiyor.
+        LABEL_MAP_EN = {
+            "Ortalama >": "Average >", "Minimum >": "Minimum >",
+            "Uniformity U1": "Uniformity U1", "Uniformity U2": "Uniformity U2",
+            "Yatay (Eh)": "Horizontal (Eh)",
+            "Dikey 0°": "Vertical 0°", "Dikey 90°": "Vertical 90°",
+            "Dikey 180°": "Vertical 180°", "Dikey 270°": "Vertical 270°",
+        }
+
+        def tl(label):
+            """plane_groups/criteria icindeki SABIT Turkce etiketi gerekirse cevirir."""
+            if lang == "en":
+                return LABEL_MAP_EN.get(label, label)
+            return label
+
+        class BrandedPDF(FPDF):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.header_title = ""
+                self.suppress_header = False
+                self.base_font = "Helvetica"
+
+            def header(self):
+                if self.suppress_header:
+                    return
+                self.set_fill_color(*BRAND)
+                self.rect(0, 0, self.w, 10, style="F")
+                self.set_text_color(255, 255, 255)
+                self.set_font(self.base_font, "B", 8.5)
+                self.set_xy(10, 2.6)
+                self.cell(0, 5, self.header_title, align="L")
+                self.set_text_color(0, 0, 0)
+                self.set_y(15)
+
+            def footer(self):
+                if self.page_no() == 1:
+                    return
+                self.set_y(-12)
+                self.set_font(self.base_font, "", 8)
+                self.set_text_color(*MUTED)
+                self.cell(0, 8, f"{t('page')} {self.page_no()}", align="C")
+                self.set_text_color(0, 0, 0)
+
         try:
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, "SAHA AYDINLATMA UYGUNLUK RAPORU", ln=True, align="C")
-            pdf.ln(4)
+            pdf = BrandedPDF(orientation="P", unit="mm", format="A4")
 
-            pdf.set_font("Helvetica", "", 11)
+            # --- Turkce karakterlerin (C, G, I, O, S, U) DOGRU gorunmesi icin
+            #     gercek bir TTF font gomuyoruz - varsayilan Helvetica bunlari
+            #     desteklemiyor. Font dosyasi yoksa (beklenmedik durum) Helvetica'ya
+            #     geri donup uygulamanin cokmesini onluyoruz. ---
+            FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+            font_regular = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+            font_bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+            font_italic = os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf")
+            try:
+                if os.path.exists(font_regular) and os.path.exists(font_bold):
+                    pdf.add_font("DejaVu", "", font_regular)
+                    pdf.add_font("DejaVu", "B", font_bold)
+                    if os.path.exists(font_italic):
+                        pdf.add_font("DejaVu", "I", font_italic)
+                    else:
+                        pdf.add_font("DejaVu", "I", font_regular)  # yedek
+                    BASE_FONT = "DejaVu"
+                else:
+                    BASE_FONT = "Helvetica"
+            except Exception:
+                BASE_FONT = "Helvetica"
+            pdf.base_font = BASE_FONT
             proj = data["project_info"]
-            for label, key in [("Stadyum/Tesis", "name"), ("Ulke / Sehir", "location"),
-                                ("Olcum Tarihi", "date"), ("Raporu Hazirlayan", "prepared_by")]:
-                pdf.cell(0, 7, f"{label}: {proj.get(key, '') or '-'}", ln=True)
-            pdf.cell(0, 7, f"Karsilastirilan Standart: {data['org']} {data['level']}", ln=True)
-            pdf.cell(0, 7, f"Izgara: {data['rows']} x {data['cols']}   "
-                           f"Olculen: {data['measured_count']}/{data['total_points']} nokta", ln=True)
-            pdf.ln(4)
+            fifa = data["fifa_info"]
+            pdf.header_title = f"{proj.get('name') or t('cover_subtitle')}"
 
-            pdf.set_font("Helvetica", "B", 13)
-            verdict = "KRITERLERI KARSILIYOR" if data["all_pass"] else "KRITERLERI KARSILAMIYOR"
-            pdf.set_text_color(20, 130, 60) if data["all_pass"] else pdf.set_text_color(180, 30, 30)
-            pdf.cell(0, 9, verdict, ln=True, align="C")
+            # ============================================================
+            # SAYFA 1: KAPAK SAYFASI (kurumsal, musteriye sunulabilir)
+            # ============================================================
+            pdf.suppress_header = True
+            pdf.add_page()
+            pdf.set_fill_color(*BRAND)
+            pdf.rect(0, 0, pdf.w, 7, style="F")
+            pdf.rect(0, pdf.h - 7, pdf.w, 7, style="F")
+
+            try:
+                logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon_print.png")
+                pdf.image(logo_path,
+                          x=pdf.w / 2 - 18, y=30, w=36, h=36)
+            except Exception:
+                pass
+
+            pdf.set_y(78)
+            pdf.set_font(BASE_FONT, "B", 21)
+            pdf.set_text_color(25, 28, 33)
+            pdf.cell(0, 11, t("cover_title"), align="C", ln=True)
+            pdf.set_font(BASE_FONT, "", 11)
+            pdf.set_text_color(120, 120, 128)
+            pdf.cell(0, 7, "Illuminance Measurement Report" if lang == "tr" else "", align="C", ln=True)
+
+            pdf.ln(10)
+            pdf.set_draw_color(*BRAND)
+            pdf.set_line_width(0.6)
+            y_line = pdf.get_y()
+            pdf.line(pdf.w / 2 - 30, y_line, pdf.w / 2 + 30, y_line)
+            pdf.set_draw_color(0, 0, 0)
+            pdf.ln(10)
+
+            pdf.set_font(BASE_FONT, "B", 18)
+            pdf.set_text_color(20, 22, 26)
+            pdf.multi_cell(0, 9, proj.get("name") or "-", align="C")
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font(BASE_FONT, "", 12)
+            pdf.set_text_color(90, 90, 98)
+            pdf.cell(0, 7, proj.get("location") or "-", align="C", ln=True)
+
+            pdf.ln(6)
+            pdf.set_font(BASE_FONT, "", 10.5)
+            pdf.set_text_color(70, 70, 78)
+            pdf.cell(0, 6, f"{t('date_label')}: {proj.get('date') or '-'}", align="C", ln=True)
+            pdf.cell(0, 6, f"{t('standard_label')}: {data['org']} - {data['level']}",
+                     align="C", ln=True)
+            pdf.cell(0, 6, f"{t('prepared_by_label')}: {proj.get('prepared_by') or '-'}", align="C", ln=True)
+
+            pdf.set_y(-30)
+            pdf.set_font(BASE_FONT, "", 9)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(0, 5, ORG_NAME, align="C", ln=True)
+            pdf.cell(0, 5, f"{t('report_created')}: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                     align="C", ln=True)
+            pdf.set_text_color(0, 0, 0)
+
+            # ============================================================
+            # SAYFA 2: "Cover Sheet" - resmi FIFA/UEFA formatiyla BIREBIR
+            # ============================================================
+            pdf.suppress_header = True
+            pdf.add_page()
+
+            def fifa_header(text):
+                pdf.set_fill_color(*BRAND)
+                pdf.set_text_color(255, 255, 255)
+                pdf.set_font(BASE_FONT, "B", 13)
+                pdf.cell(0, 10, text, ln=True, fill=True, align="C")
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(2)
+
+            def fifa_row(label, value):
+                pdf.set_font(BASE_FONT, "", 10)
+                pdf.set_fill_color(*BRAND_TINT)
+                pdf.cell(75, 8, label, border=1, fill=True)
+                pdf.cell(0, 8, str(value) if value else "-", border=1, ln=True)
+
+            fifa_header(f"{data['org']} {t('fifa_cover_title')}")
+            fifa_row(t("name_of_stadium"), proj.get("name"))
+            fifa_row(t("city_location"), proj.get("location"))
+            fifa_row(t("date_of_inspection"), proj.get("date"))
+
+            pdf.ln(2)
+            pdf.set_font(BASE_FONT, "B", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.cell(75, 8, "", border=0)
+            pdf.cell(0, 8, t("luminaire"), border=1, align="C", fill=True, ln=True)
+
+            def fifa_lum_row(label, suffix):
+                pdf.set_font(BASE_FONT, "", 10)
+                pdf.cell(75, 8, label, border=1)
+                pdf.cell(0, 8, fifa.get(f"lum1_{suffix}") or "-", border=1, align="C", ln=True)
+
+            fifa_lum_row(t("manufacturer"), "manufacturer")
+            fifa_lum_row(t("model_product_type"), "model")
+
+            pdf.ln(2)
+            fifa_row(t("illuminance_meter_used"), METER_MODEL)
+            fifa_row(t("serial_illuminance_meter"), METER_SERIAL)
+            fifa_row(t("calibration_date"), fifa.get("cal_date"))
+            probe_labels = [
+                (t("probe_serial", n=0), "Eh"),
+                (t("probe_serial", n=1), "Ev0"),
+                (t("probe_serial", n=2), "Ev90"),
+                (t("probe_serial", n=3), "Ev180"),
+                (t("probe_serial", n=4), "Ev270"),
+            ]
+            for label, probe_key in probe_labels:
+                fifa_row(label, PROBE_SERIALS[probe_key])
+
+            pdf.ln(2)
+            fifa_row(t("colour_meter_used"), fifa.get("colour_meter"))
+            fifa_row(t("serial_colour_meter"), fifa.get("colour_meter_serial"))
+            fifa_row(t("calibration_date"), fifa.get("colour_meter_cal_date"))
+
+            pdf.ln(2)
+            pdf.set_font(BASE_FONT, "B", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.cell(75, 8, t("pitch_measurements"), border=0)
+            pdf.cell(55, 8, t("width"), border=1, align="C", fill=True)
+            pdf.cell(0, 8, t("length"), border=1, align="C", fill=True, ln=True)
+            pdf.set_font(BASE_FONT, "", 10)
+            pdf.cell(75, 8, "", border=0)
+            w_val = f"{fifa.get('pitch_width')} m" if fifa.get("pitch_width") else "-"
+            l_val = f"{fifa.get('pitch_length')} m" if fifa.get("pitch_length") else "-"
+            pdf.cell(55, 8, w_val, border=1, align="C")
+            pdf.cell(0, 8, l_val, border=1, align="C", ln=True)
+
+            pdf.ln(2)
+            fifa_row(t("organisation_inspecting"), ORG_NAME)
+            pdf.set_font(BASE_FONT, "", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            addr_y = pdf.get_y()
+            pdf.multi_cell(75, 8, t("address"), border=1, fill=True)
+            addr_h = pdf.get_y() - addr_y
+            pdf.set_xy(75 + 10, addr_y)
+            pdf.multi_cell(0, 8, ORG_ADDRESS, border=1)
+            val_h = pdf.get_y() - addr_y
+            pdf.set_y(addr_y + max(addr_h, val_h))
+            fifa_row(t("telephone_email"), ORG_PHONE_EMAIL)
+            fifa_row(t("inspection_by"), INSPECTOR_NAME)
+            fifa_row(t("signature"), "")
+
+            # ============================================================
+            # SAYFA 3: "Summary of Results" - resmi FIFA/UEFA formatiyla
+            # ============================================================
+            pdf.add_page()
+            fifa_header(f"{data['org']} {t('fifa_summary_title')}")
+
+            pdf.set_font(BASE_FONT, "", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.cell(90, 8, t("stadium_name_location"), border=1, fill=True)
+            pdf.cell(0, 8, f"{proj.get('name') or '-'} / {proj.get('location') or '-'}",
+                     border=1, ln=True)
+            pdf.cell(90, 8, t("test_date"), border=1, fill=True)
+            pdf.cell(0, 8, proj.get("date") or "-", border=1, ln=True)
+            pdf.ln(3)
+
+            fm = data["fifa_metrics"]
+
+            def fifa_fmt(v, dec=0):
+                return f"{v:.{dec}f}" if isinstance(v, (int, float)) else "-"
+
+            def metric_row(label, value):
+                pdf.set_font(BASE_FONT, "", 9.5)
+                pdf.cell(130, 7, label, border=1)
+                pdf.cell(0, 7, str(value), border=1, align="C", ln=True)
+
+            for title, deg in [("Ev0", "0°"), ("Ev90", "90°"), ("Ev180", "180°"), ("Ev270", "270°")]:
+                m = fm[title]
+                pdf.set_font(BASE_FONT, "B", 10)
+                pdf.set_fill_color(*BRAND_TINT)
+                pdf.cell(0, 7, f"{t('vertical_plane')} - {deg}", border=1, fill=True, ln=True)
+                metric_row(f"{t('ev_min')}-{deg}", fifa_fmt(m["min"]))
+                metric_row(f"{t('ev_max')}-{deg}", fifa_fmt(m["max"]))
+                metric_row(f"{t('ev_ave')}-{deg}", fifa_fmt(m["avg"]))
+                metric_row(f"{t('uniformity_u1v')}-{deg}", fifa_fmt(m["u1"], 2))
+                metric_row(f"{t('uniformity_u2v')}-{deg}", fifa_fmt(m["u2"], 2))
+                metric_row(f"{t('maur_fails')} {deg}",
+                           m["maur_fails"] if m["maur_fails"] is not None else "-")
+
+            m = fm["Eh"]
+            pdf.set_font(BASE_FONT, "B", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.cell(0, 7, t("horizontal_plane"), border=1, fill=True, ln=True)
+            metric_row(t("eh_min"), fifa_fmt(m["min"]))
+            metric_row(t("eh_max"), fifa_fmt(m["max"]))
+            metric_row(t("eh_ave"), fifa_fmt(m["avg"]))
+            metric_row(t("uniformity_u1h"), fifa_fmt(m["u1"], 2))
+            metric_row(t("uniformity_u2h"), fifa_fmt(m["u2"], 2))
+            metric_row(t("maur_horizontal_fails"), m["maur_fails"] if m["maur_fails"] is not None else "-")
+
+            pdf.set_font(BASE_FONT, "B", 10)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.cell(0, 7, t("other_measurements"), border=1, fill=True, ln=True)
+            metric_row(t("avg_flicker"), fifa.get("flicker_avg") or "-")
+            metric_row(t("max_flicker"), fifa.get("flicker_max") or "-")
+            metric_row(t("colour_temp"), fifa.get("colour_temp_tc") or "-")
+            metric_row(t("colour_rendering"), fifa.get("colour_rendering_ra") or "-")
+            metric_row(t("glare_rating"), fifa.get("glare_rating_rg") or "-")
+
+            # ============================================================
+            # SAYFA 4+: Bizim kendi detayli ic raporumuz (marka renkleriyle)
+            # ============================================================
+            pdf.suppress_header = False
+            pdf.add_page()
+            pdf.set_font(BASE_FONT, "B", 16)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 10, t("detailed_report_title"), ln=True, align="C")
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
+            pdf.set_font(BASE_FONT, "", 10)
+            pdf.cell(0, 6, f"{t('facility')}: {proj.get('name') or '-'}", ln=True)
+            pdf.cell(0, 6, f"{t('country_city')}: {proj.get('location') or '-'}", ln=True)
+            pdf.cell(0, 6, f"{t('date_label')}: {proj.get('date') or '-'}", ln=True)
+            pdf.cell(0, 6, f"{t('prepared_by_label')}: {proj.get('prepared_by') or '-'}", ln=True)
+            pdf.cell(0, 6, f"{t('standard_label')}: {data['org']} {data['level']}", ln=True)
+            total_points = data["total_points"]
+            measured_count = data["measured_count"]
+            pdf.cell(0, 6, f"{t('grid')}: {data['rows_count']} x {data['cols_count']}   "
+                           f"{t('measured')}: {measured_count}/{total_points}", ln=True)
+            pdf.ln(3)
 
-            col_w = [55, 35, 35, 45]
-            for plane_title, criteria in data["plane_groups"]:
-                pdf.set_font("Helvetica", "B", 11)
-                pdf.set_fill_color(230, 230, 230)
-                pdf.cell(sum(col_w), 7, plane_title, ln=True, fill=True)
-                pdf.set_font("Helvetica", "", 10)
-                headers = ["Kriter", "Referans", "Olculen", "Sonuc"]
-                pdf.set_font("Helvetica", "B", 9)
-                for w, h in zip(col_w, headers):
-                    pdf.cell(w, 6, h, border=1)
+            verdict_ok = data["all_pass"]
+            pdf.set_fill_color(224, 242, 228) if verdict_ok else pdf.set_fill_color(250, 226, 226)
+            pdf.set_draw_color(*(GOOD if verdict_ok else BAD))
+            pdf.set_line_width(0.4)
+            vy = pdf.get_y()
+            pdf.rect(10, vy, pdf.w - 20, 10, style="DF")
+            pdf.set_xy(10, vy + 1.5)
+            pdf.set_font(BASE_FONT, "B", 12)
+            pdf.set_text_color(*(GOOD if verdict_ok else BAD))
+            pdf.cell(pdf.w - 20, 7, t("meets_criteria") if verdict_ok else t("fails_criteria"),
+                     align="C")
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_draw_color(0, 0, 0)
+            pdf.set_line_width(0.2)
+            pdf.set_y(vy + 13)
+
+            for group_title, criteria in data["plane_groups"]:
+                pdf.set_font(BASE_FONT, "B", 11)
+                pdf.set_fill_color(*BRAND_TINT)
+                pdf.set_text_color(*BRAND)
+                pdf.cell(0, 7, tl(group_title), border=1, fill=True, ln=True)
+                pdf.set_text_color(0, 0, 0)
+                col_w = [55, 35, 45, 45]
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_fill_color(240, 240, 244)
+                for w, h in zip(col_w, [t("criterion"), t("reference"), t("measured_col"), t("result")]):
+                    pdf.cell(w, 6, h, border=1, fill=True)
                 pdf.ln()
-                pdf.set_font("Helvetica", "", 9)
-                for kriter, referans, olculen, ok in criteria:
-                    pdf.cell(col_w[0], 6, kriter, border=1)
-                    pdf.cell(col_w[1], 6, referans, border=1)
-                    pdf.cell(col_w[2], 6, olculen, border=1)
-                    pdf.set_text_color(20, 130, 60) if ok else pdf.set_text_color(180, 30, 30)
-                    pdf.cell(col_w[3], 6, "UYGUN" if ok else "UYGUN DEGIL", border=1)
+                pdf.set_font(BASE_FONT, "", 9)
+                for label, ref, val, ok in criteria:
+                    pdf.cell(col_w[0], 6, tl(label), border=1)
+                    pdf.cell(col_w[1], 6, str(ref), border=1, align="C")
+                    pdf.cell(col_w[2], 6, str(val), border=1, align="C")
+                    pdf.set_text_color(*GOOD) if ok else pdf.set_text_color(*BAD)
+                    pdf.cell(col_w[3], 6, t("compliant") if ok else t("non_compliant"), border=1)
                     pdf.set_text_color(0, 0, 0)
                     pdf.ln()
                 pdf.ln(2)
 
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "MAUR - Komsu Nokta Tekduzeligi", ln=True)
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font(BASE_FONT, "B", 12)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 8, t("maur_title"), ln=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font(BASE_FONT, "", 10)
             if data["maur_ratio"] is None:
-                pdf.cell(0, 7, "Bu standart seviyesi icin MAUR belirtilmemis.", ln=True)
+                pdf.cell(0, 7, t("maur_not_specified"), ln=True)
             else:
-                pdf.cell(0, 7, f"Toplam hata (5 duzlem): {data['maur_total_fail']} / "
-                               f"izin verilen {data['maur_max_fail']}", ln=True)
-                pdf.set_font("Helvetica", "B", 11)
-                pdf.set_text_color(20, 130, 60) if data["maur_ok"] else pdf.set_text_color(180, 30, 30)
-                pdf.cell(0, 7, "UYGUN" if data["maur_ok"] else "UYGUN DEGIL", ln=True)
+                pdf.cell(0, 7, f"{t('threshold_ratio')}: {data['maur_ratio']:.2f}   |   "
+                               f"{t('total_fails')}: {data['maur_total_fail']} / "
+                               f"{t('allowed')} {data['maur_max_fail']}", ln=True)
+                pdf.set_font(BASE_FONT, "B", 11)
+                pdf.set_text_color(*GOOD) if data["maur_ok"] else pdf.set_text_color(*BAD)
+                pdf.cell(0, 7, t("compliant") if data["maur_ok"] else t("non_compliant"), ln=True)
                 pdf.set_text_color(0, 0, 0)
+                pdf.ln(2)
 
-            # --- YENI: Ham Olcum Verileri sayfasi ---
+                fm = data["fifa_metrics"]
+                any_detail = any(fm[t2].get("maur_fail_details") for t2, _ in PROBES)
+                if not any_detail:
+                    pdf.set_font(BASE_FONT, "I", 9.5)
+                    pdf.set_text_color(*GOOD)
+                    pdf.cell(0, 6, t("no_maur_fails"), ln=True)
+                    pdf.set_text_color(0, 0, 0)
+                else:
+                    for title, _ in PROBES:
+                        details = fm[title].get("maur_fail_details") or []
+                        if not details:
+                            continue
+                        if pdf.get_y() > 250:
+                            pdf.add_page()
+                        pdf.set_font(BASE_FONT, "B", 10)
+                        pdf.set_fill_color(*BRAND_TINT)
+                        pdf.cell(0, 6.5, f"{title} - {len(details)} {t('faulty_pairs')}", border=1,
+                                 fill=True, ln=True)
+                        pdf.set_font(BASE_FONT, "B", 9)
+                        pdf.set_fill_color(240, 240, 244)
+                        col_w = [55, 40, 40, 45]
+                        detail_headers = [t("point_pair"), t("value1"), t("value2"), t("ratio")]
+                        for w, h in zip(col_w, detail_headers):
+                            pdf.cell(w, 6, h, border=1, fill=True, align="C")
+                        pdf.ln()
+                        pdf.set_font(BASE_FONT, "", 9)
+                        for item in details:
+                            if pdf.get_y() > 270:
+                                pdf.add_page()
+                                pdf.set_font(BASE_FONT, "B", 9)
+                                pdf.set_fill_color(240, 240, 244)
+                                for w, h in zip(col_w, detail_headers):
+                                    pdf.cell(w, 6, h, border=1, fill=True, align="C")
+                                pdf.ln()
+                                pdf.set_font(BASE_FONT, "", 9)
+                            pdf.cell(col_w[0], 6, f"{t('grid_no')} {item['grid1']} <-> {item['grid2']}",
+                                     border=1, align="C")
+                            pdf.cell(col_w[1], 6, f"{item['v1']}", border=1, align="C")
+                            pdf.cell(col_w[2], 6, f"{item['v2']}", border=1, align="C")
+                            pdf.set_text_color(*BAD)
+                            pdf.cell(col_w[3], 6, f"{item['ratio']:.2f}", border=1, align="C")
+                            pdf.set_text_color(0, 0, 0)
+                            pdf.ln()
+                        pdf.ln(2)
+
+            # --- Ham Olcum Verileri sayfasi ---
             raw_seq = data["raw_sequence"]
             raw_meas = data["raw_measurements"]
             pdf.add_page()
-            pdf.set_font("Helvetica", "B", 14)
-            pdf.cell(0, 10, "Ham Olcum Verileri", ln=True)
+            pdf.set_font(BASE_FONT, "B", 14)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 10, t("raw_data_title"), ln=True)
+            pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
-            headers_raw = ["Grid No"] + [title for title, _ in PROBES]
+            headers_raw = [t("grid_no")] + [title for title, _ in PROBES]
             col_w_raw = [22, 33, 33, 33, 33, 33]
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_fill_color(230, 230, 230)
-            for w, h in zip(col_w_raw, headers_raw):
-                pdf.cell(w, 7, h, border=1, fill=True, align="C")
-            pdf.ln()
-            pdf.set_font("Helvetica", "", 9)
+
+            def raw_header_row():
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_fill_color(*BRAND)
+                pdf.set_text_color(255, 255, 255)
+                for w, h in zip(col_w_raw, headers_raw):
+                    pdf.cell(w, 7, h, border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_text_color(0, 0, 0)
+
+            raw_header_row()
+            pdf.set_font(BASE_FONT, "", 9)
+            row_i = 0
             for idx in range(len(raw_seq)):
                 d = raw_meas.get(idx)
                 if d is None:
                     continue
-                if pdf.get_y() > 270:  # sayfa sonuna yakinsa yeni sayfa ac, basligi tekrarla
+                if pdf.get_y() > 270:
                     pdf.add_page()
-                    pdf.set_font("Helvetica", "B", 9)
-                    pdf.set_fill_color(230, 230, 230)
-                    for w, h in zip(col_w_raw, headers_raw):
-                        pdf.cell(w, 7, h, border=1, fill=True, align="C")
-                    pdf.ln()
-                    pdf.set_font("Helvetica", "", 9)
-                pdf.cell(col_w_raw[0], 6, str(idx + 1), border=1, align="C")
+                    raw_header_row()
+                    pdf.set_font(BASE_FONT, "", 9)
+                pdf.set_fill_color(*(BRAND_TINT if row_i % 2 == 0 else (255, 255, 255)))
+                pdf.cell(col_w_raw[0], 6, str(idx + 1), border=1, align="C", fill=True)
                 for w, (title, _) in zip(col_w_raw[1:], PROBES):
                     val = d["values"].get(title)
-                    pdf.cell(w, 6, f"{val}" if val is not None else "-", border=1, align="C")
+                    pdf.cell(w, 6, f"{val}" if val is not None else "-", border=1, align="C", fill=True)
                 pdf.ln()
+                row_i += 1
 
-            # --- YENI: Her veri seti icin renkli Isi Haritasi sayfasi ---
+            # --- Her veri seti icin renkli Isi Haritasi sayfasi ---
             rows_n = data["rows_count"]
             cols_n = data["cols_count"]
+            pos_to_gridno_pdf = {rc: idx + 1 for idx, rc in enumerate(data["raw_sequence"])}
             for title, _ in PROBES:
                 grid = self._dataset_grid(raw_meas, rows_n, cols_n, title)
                 vals = [v for row_vals in grid for v in row_vals if v is not None]
@@ -1985,17 +3096,45 @@ class ReportScreen(Screen):
                     continue
                 vmin_g, vmax_g = min(vals), max(vals)
 
+                # uygulamadaki gibi en yuksek/dusuk 3 degeri isaretlemek icin
+                indexed_vals = sorted(
+                    [(v, ci, ri) for ci, row in enumerate(grid) for ri, v in enumerate(row) if v is not None]
+                )
+                n_extreme = min(3, len(indexed_vals))
+                lowest_set = {(ci, ri) for v, ci, ri in indexed_vals[:n_extreme]}
+                highest_set = {(ci, ri) for v, ci, ri in indexed_vals[-n_extreme:]}
+
                 pdf.add_page()
-                pdf.set_font("Helvetica", "B", 14)
-                pdf.cell(0, 10, f"Isi Haritasi - {title}", ln=True)
+                pdf.set_font(BASE_FONT, "B", 14)
+                pdf.set_text_color(*BRAND)
+                pdf.cell(0, 10, f"{t('heatmap_title')} - {title}", ln=True)
+                pdf.set_text_color(0, 0, 0)
                 pdf.ln(2)
 
-                avail_w = 190
-                avail_h = 220
+                dir_margin = 9  # 180deg/0deg etiketleri icin sol/sag bosluk
+                avail_w = 190 - 2 * dir_margin
+                avail_h = 190
                 cell_w = min(avail_w / rows_n, 22)
                 cell_h = min(avail_h / cols_n, 14)
-                start_x = pdf.get_x()
+                grid_w_total = rows_n * cell_w
+                grid_h_total = cols_n * cell_h
+
+                # --- 270deg etiketi (ustte, ortada) ---
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_text_color(*BRAND)
+                pdf.set_xy(pdf.l_margin + dir_margin, pdf.get_y())
+                pdf.cell(grid_w_total, 5, "270°", align="C")
+                pdf.ln(6)
+
+                start_x = pdf.l_margin + dir_margin
                 start_y = pdf.get_y()
+
+                # --- 180deg (sol) ve 0deg (sag) etiketleri (dikey ortada) ---
+                pdf.set_xy(pdf.l_margin, start_y + grid_h_total / 2 - 2.5)
+                pdf.cell(dir_margin - 1, 5, "180°", align="C")
+                pdf.set_xy(start_x + grid_w_total + 1, start_y + grid_h_total / 2 - 2.5)
+                pdf.cell(dir_margin - 1, 5, "0°", align="C")
+                pdf.set_text_color(0, 0, 0)
 
                 for c_idx, row_vals in enumerate(grid):
                     for r_idx, val in enumerate(row_vals):
@@ -2003,25 +3142,100 @@ class ReportScreen(Screen):
                         y = start_y + c_idx * cell_h
                         if val is None:
                             pdf.set_fill_color(230, 230, 230)
-                            pdf.rect(x, y, cell_w, cell_h, style="F")
+                            pdf.set_draw_color(255, 255, 255)
+                            pdf.rect(x, y, cell_w, cell_h, style="DF")
                             continue
                         rgba = lux_color(val, vmin_g, vmax_g)
                         pdf.set_fill_color(int(rgba[0]*255), int(rgba[1]*255), int(rgba[2]*255))
-                        pdf.rect(x, y, cell_w, cell_h, style="F")
+                        pdf.set_draw_color(255, 255, 255)
+                        pdf.rect(x, y, cell_w, cell_h, style="DF")
                         txt_rgba = text_color_for_bg(rgba)
                         pdf.set_text_color(int(txt_rgba[0]*255), int(txt_rgba[1]*255), int(txt_rgba[2]*255))
                         pdf.set_xy(x, y + cell_h / 2 - 2)
-                        pdf.set_font("Helvetica", "B", 6.5)
+                        pdf.set_font(BASE_FONT, "B", 6.5)
                         pdf.cell(cell_w, 4, f"{val}", align="C")
+                        # Grid No - hucrenin sol ust kosesinde, kucuk ve sonuk
+                        grid_no_val = pos_to_gridno_pdf.get((r_idx, c_idx))
+                        if grid_no_val is not None:
+                            pdf.set_xy(x + 0.8, y + 0.6)
+                            pdf.set_font(BASE_FONT, "", 5)
+                            pdf.cell(cell_w - 1, 3, str(grid_no_val), align="L")
+                        # kose isareti: min (mavi) / maks (kirmizi) - uygulamadaki bayrak gibi
+                        # (once beyaz kontur, uzerine renkli isaret - HER zeminde gorunur)
+                        if (c_idx, r_idx) in lowest_set or (c_idx, r_idx) in highest_set:
+                            mark_color = MIN_MARK if (c_idx, r_idx) in lowest_set else MAX_MARK
+                            pdf.set_fill_color(255, 255, 255)
+                            pdf.rect(x + cell_w - 3.6, y, 3.6, 3.6, style="F")
+                            pdf.set_fill_color(*mark_color)
+                            pdf.rect(x + cell_w - 3, y + 0.3, 3, 3, style="F")
                 pdf.set_text_color(0, 0, 0)
+                pdf.set_draw_color(0, 0, 0)
+
+                # --- 90deg etiketi (altta, ortada) ---
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_text_color(*BRAND)
+                pdf.set_xy(start_x, start_y + grid_h_total + 2)
+                pdf.cell(grid_w_total, 5, "90°", align="C")
+                pdf.set_text_color(0, 0, 0)
+
+                # --- Renk skalasi (legend) - uygulamadaki Sonuc ekraniyla ayni ---
+                legend_y = start_y + cols_n * cell_h + 15
+                legend_x = start_x
+                legend_w = min(avail_w, rows_n * cell_w)
+                legend_h = 6
+                steps = 50
+                seg_w = legend_w / steps
+                for i in range(steps):
+                    t_frac = i / (steps - 1)
+                    color = lux_color(vmin_g + t_frac * (vmax_g - vmin_g), vmin_g, vmax_g)
+                    pdf.set_fill_color(int(color[0]*255), int(color[1]*255), int(color[2]*255))
+                    pdf.rect(legend_x + i * seg_w, legend_y, seg_w + 0.4, legend_h, style="F")
+                pdf.set_draw_color(180, 180, 180)
+                pdf.rect(legend_x, legend_y, legend_w, legend_h, style="D")
+                pdf.set_draw_color(0, 0, 0)
+
+                pdf.set_font(BASE_FONT, "", 8)
+                pdf.set_text_color(100, 100, 105)
+                n_ticks = 5
+                for i in range(n_ticks):
+                    t_frac = i / (n_ticks - 1)
+                    val_tick = vmin_g + t_frac * (vmax_g - vmin_g)
+                    tx = legend_x + t_frac * legend_w
+                    pdf.set_xy(tx - 10, legend_y + legend_h + 1)
+                    align = "L" if i == 0 else ("R" if i == n_ticks - 1 else "C")
+                    pdf.cell(20, 5, f"{val_tick:.0f}", align=align)
+                pdf.set_text_color(0, 0, 0)
+
+                # --- Bu duzleme ait Ortalama/Min/Maks/Duzgunluk ozeti ---
+                stats = data["fifa_metrics"][title]
+                stat_items = [
+                    (t("average"), f"{stats['avg']:.0f}"),
+                    (t("minimum"), f"{stats['min']:.0f}"),
+                    (t("maximum"), f"{stats['max']:.0f}"),
+                    (t("uniformity_u1_short"), f"{stats['u1']:.2f}"),
+                    (t("uniformity_u2_short"), f"{stats['u2']:.2f}"),
+                ]
+                stats_y = legend_y + legend_h + 12
+                stats_w = max(legend_w, 150)
+                col_w_stat = stats_w / len(stat_items)
+                pdf.set_xy(start_x, stats_y)
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_fill_color(*BRAND_TINT)
+                for label, _ in stat_items:
+                    pdf.cell(col_w_stat, 7, label, border=1, fill=True, align="C")
+                pdf.set_xy(start_x, stats_y + 7)
+                pdf.set_font(BASE_FONT, "B", 11)
+                pdf.set_fill_color(255, 255, 255)
+                for _, val in stat_items:
+                    pdf.cell(col_w_stat, 8, val, border=1, align="C")
 
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
             pdf.output(fpath)
             final_location = self._publish_to_downloads(fpath, fname, "application/pdf")
-            self._show_message_popup("PDF Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+            self._show_message_popup(t("pdf_saved"), f"{t('file_saved')}:\n{final_location}")
         except Exception as e:
-            self._show_message_popup("PDF Hatasi", f"PDF olusturulurken bir sorun olustu:\n{e}")
+            self._show_message_popup(t("pdf_error"), f"{t('pdf_error_msg')}:\n{e}")
 
     def export_excel(self):
         data = self._compute_report_data()
@@ -2174,6 +3388,7 @@ class ReportScreen(Screen):
 
         all_pass = True
         plane_groups = []
+        fifa_metrics = {}
         for title, kind in PROBES:
             vals = [d["values"][title] for d in measured.values()]
             avg = sum(vals) / len(vals)
@@ -2181,6 +3396,7 @@ class ReportScreen(Screen):
             vmax = max(vals)
             u1 = (vmin / vmax) if vmax else 0
             u2 = (vmin / avg) if avg else 0
+            fifa_metrics[title] = {"min": vmin, "max": vmax, "avg": avg, "u1": u1, "u2": u2}
 
             req_avg = thresholds[f"{kind}_avg"]
             req_min = thresholds.get(f"{kind}_min")
@@ -2210,6 +3426,8 @@ class ReportScreen(Screen):
                 all_pass = False
             plane_groups.append((PLANE_LABELS[title], criteria))
 
+        pos_to_gridno = {rc: idx + 1 for idx, rc in enumerate(ms.sequence)}
+
         maur_ratio = thresholds.get("maur_ratio")
         maur_max_fail = thresholds.get("maur_max_fail")
         maur_total_fail = 0
@@ -2217,10 +3435,24 @@ class ReportScreen(Screen):
         if maur_ratio is not None:
             for title, kind in PROBES:
                 plane_pos = {(d["r"], d["c"]): d["values"][title] for d in measured.values()}
-                maur_total_fail += len(compute_maur_failures(plane_pos, maur_ratio))
+                plane_failures = compute_maur_failures(plane_pos, maur_ratio)
+                fifa_metrics[title]["maur_fails"] = len(plane_failures)
+                fifa_metrics[title]["maur_fail_details"] = [
+                    {
+                        "grid1": pos_to_gridno.get((r1, c1), "?"),
+                        "grid2": pos_to_gridno.get((r2, c2), "?"),
+                        "v1": v1, "v2": v2, "ratio": ratio,
+                    }
+                    for (r1, c1), (r2, c2), v1, v2, ratio in plane_failures
+                ]
+                maur_total_fail += len(plane_failures)
             maur_ok = maur_total_fail <= maur_max_fail
             if not maur_ok:
                 all_pass = False
+        else:
+            for title, kind in PROBES:
+                fifa_metrics[title]["maur_fails"] = None
+                fifa_metrics[title]["maur_fail_details"] = []
 
         return {
             "measured_count": len(measured), "total_points": len(ms.sequence),
@@ -2230,6 +3462,8 @@ class ReportScreen(Screen):
             "maur_ratio": maur_ratio, "maur_max_fail": maur_max_fail,
             "maur_total_fail": maur_total_fail, "maur_ok": maur_ok,
             "project_info": dict(ms.project_info),
+            "fifa_info": dict(ms.fifa_info),
+            "fifa_metrics": fifa_metrics,
             "raw_sequence": list(ms.sequence),
             "raw_measurements": {idx: dict(d) for idx, d in measured.items()},
             "rows_count": ms.rows_count_val,
@@ -2282,6 +3516,34 @@ class ReportScreen(Screen):
         proj_card.bind(minimum_height=proj_card.setter("height"))
         self.content_area.add_widget(proj_card)
 
+        fifa_btn = FlatButton(text="FIFA Rapor Bilgilerini Duzenle", bg_color=ACCENT,
+                               font_size=sp(13), bold=True, size_hint_y=None, height=dp(46))
+        fifa_btn.bind(on_release=lambda b: self._open_fifa_info_popup())
+        self.content_area.add_widget(fifa_btn)
+
+        lang_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        lang_label = Label(text="Rapor Dili:", font_size=sp(13), color=TEXT_MUTED,
+                            size_hint_x=0.35, halign="left", valign="middle")
+        lang_label.bind(size=lambda i, v: setattr(i, "text_size", v))
+        lang_row.add_widget(lang_label)
+        self.lang_btn = FlatButton(
+            text="Turkce" if ms.report_language == "tr" else "English",
+            bg_color=CARD_LIGHT, font_size=sp(13), bold=True)
+        self.lang_btn.bind(on_release=lambda b: self._toggle_report_language())
+        lang_row.add_widget(self.lang_btn)
+        self.content_area.add_widget(lang_row)
+
+        data_btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        export_data_btn = FlatButton(text="Verileri Disa Aktar", bg_color=CARD_LIGHT,
+                                      font_size=sp(12.5), bold=True)
+        export_data_btn.bind(on_release=lambda b: self.export_data_json())
+        import_data_btn = FlatButton(text="Verileri Ice Aktar", bg_color=CARD_LIGHT,
+                                      font_size=sp(12.5), bold=True)
+        import_data_btn.bind(on_release=lambda b: self.import_data_json())
+        data_btn_row.add_widget(export_data_btn)
+        data_btn_row.add_widget(import_data_btn)
+        self.content_area.add_widget(data_btn_row)
+
         measured = {idx: d for idx, d in ms.measurements.items() if d["values"] is not None}
         total_points = len(ms.sequence)
 
@@ -2302,10 +3564,15 @@ class ReportScreen(Screen):
         info_card.add_widget(Label(text=f"Standart: {ms.org} - {ms.level}", font_size=sp(14),
                                     bold=True, color=TEXT, size_hint_y=None, height=dp(22),
                                     halign="left", text_size=(dp(300), None)))
-        info_card.add_widget(Label(text=f"Izgara: {ms.rows_count_val} x {ms.cols_count_val}   |   "
-                                         f"Olculen: {len(measured)}/{total_points} nokta",
-                                    font_size=sp(12.5), color=TEXT_MUTED, size_hint_y=None,
-                                    height=dp(20), halign="left", text_size=(dp(300), None)))
+        is_incomplete = len(measured) < total_points
+        count_color = RED_TXT if is_incomplete else GREEN_TXT
+        count_label = Label(text=f"Izgara: {ms.rows_count_val} x {ms.cols_count_val}   |   "
+                                  f"Olculen: {len(measured)}/{total_points} nokta"
+                                  + ("  (EKSIK)" if is_incomplete else ""),
+                             font_size=sp(12.5), color=count_color, bold=is_incomplete,
+                             size_hint_y=None, height=dp(20), halign="left",
+                             text_size=(dp(300), None))
+        info_card.add_widget(count_label)
         info_card.bind(minimum_height=info_card.setter("height"))
         self.content_area.add_widget(info_card)
 
@@ -2318,12 +3585,12 @@ class ReportScreen(Screen):
         maur_ok = data["maur_ok"]
 
         # --- Genel sonuc banner ---
-        verdict_card = Card(bg_color=SUCCESS_TINT if all_pass else (0.22, 0.09, 0.10, 1),
+        verdict_card = Card(bg_color=SUCCESS_TINT if all_pass else DANGER_TINT,
                              radius=14, border_color=SUCCESS if all_pass else DANGER,
                              size_hint_y=None, height=dp(56), padding=[dp(16), 0, dp(16), 0])
         verdict_text = ("KRITERLERI KARSILIYOR" if all_pass else "KRITERLERI KARSILAMIYOR")
         verdict_card.add_widget(Label(text=verdict_text, font_size=sp(16), bold=True,
-                                       color=(0.6, 0.9, 0.7, 1) if all_pass else (1, 0.6, 0.6, 1)))
+                                       color=GREEN_TXT if all_pass else RED_TXT))
         self.content_area.add_widget(verdict_card)
 
         # --- Detay tablosu: her duzlem icin Kriter / Referans / Olculen / Sonuc ---
@@ -2413,6 +3680,105 @@ class PlaceholderScreen(Screen):
 # ---------------------------------------------------------
 # ANA UYGULAMA + OZEL ALT NAVIGASYON
 # ---------------------------------------------------------
+class SettingsScreen(Screen):
+    def __init__(self, measure_screen, **kwargs):
+        super().__init__(**kwargs)
+        self.measure_screen = measure_screen
+
+        with self.canvas.before:
+            Color(*BG)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        outer = BoxLayout(orientation="vertical", padding=[dp(16), dp(50), dp(16), dp(16)],
+                           spacing=dp(14))
+
+        title = Label(text="Ayarlar", font_size=sp(22), bold=True, color=TEXT,
+                       size_hint_y=None, height=dp(36), halign="left")
+        title.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(title)
+
+        # --- Gorunum bolumu ---
+        section_lbl = Label(text="GORUNUM", font_size=sp(12), color=TEXT_MUTED, bold=True,
+                             size_hint_y=None, height=dp(24), halign="left")
+        section_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(section_lbl)
+
+        theme_card = Card(bg_color=CARD, radius=12, size_hint_y=None, height=dp(64),
+                           padding=[dp(16), dp(0), dp(12), dp(0)])
+        theme_row = BoxLayout()
+        theme_label_box = BoxLayout(orientation="vertical")
+        theme_title = Label(text="Gece Modu" if CURRENT_THEME == "dark" else "Gunduz Modu",
+                             font_size=sp(15), color=TEXT, halign="left", valign="middle")
+        theme_title.bind(size=lambda i, v: setattr(i, "text_size", v))
+        theme_sub = Label(text="Sahada gun isiginda okunabilirlik icin Gunduz Modu'nu secin",
+                           font_size=sp(11.5), color=TEXT_MUTED, halign="left", valign="middle")
+        theme_sub.bind(size=lambda i, v: setattr(i, "text_size", v))
+        theme_label_box.add_widget(theme_title)
+        theme_label_box.add_widget(theme_sub)
+        theme_row.add_widget(theme_label_box)
+
+        self.theme_toggle_btn = FlatButton(
+            text="Gunduz" if CURRENT_THEME == "dark" else "Gece",
+            bg_color=ACCENT, font_size=sp(13), bold=True,
+            size_hint=(None, None), size=(dp(90), dp(40)))
+        self.theme_toggle_btn.bind(on_release=self._on_toggle_theme)
+        theme_row.add_widget(self.theme_toggle_btn)
+        theme_card.add_widget(theme_row)
+        outer.add_widget(theme_card)
+
+        # --- Uygulama Hakkinda bolumu ---
+        about_section_lbl = Label(text="UYGULAMA", font_size=sp(12), color=TEXT_MUTED, bold=True,
+                                   size_hint_y=None, height=dp(24), halign="left")
+        about_section_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(about_section_lbl)
+
+        about_card = Card(bg_color=CARD, radius=12, orientation="vertical", size_hint_y=None,
+                           height=dp(96), padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(6))
+
+        def about_row(label_text, value_text):
+            row = BoxLayout(size_hint_y=None, height=dp(22))
+            l = Label(text=label_text, font_size=sp(12.5), color=TEXT_MUTED, halign="left")
+            l.bind(size=lambda i, v: setattr(i, "text_size", v))
+            v = Label(text=value_text, font_size=sp(12.5), color=TEXT, halign="right", bold=True)
+            v.bind(size=lambda i, v2: setattr(i, "text_size", v2))
+            row.add_widget(l)
+            row.add_widget(v)
+            return row
+
+        about_card.add_widget(about_row("Surum", "v45"))
+        about_card.add_widget(about_row("Gelistiren", "Kerem Akgun"))
+        about_card.add_widget(about_row("Cihaz", "Konica Minolta T-10MA"))
+        outer.add_widget(about_card)
+
+        # --- Bilgi notu (ileride baska ayarlar buraya eklenecek) ---
+        info_lbl = Label(text="Daha fazla ayar yakinda eklenecek.",
+                          font_size=sp(12), color=TEXT_MUTED,
+                          size_hint_y=None, height=dp(24), halign="left")
+        info_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(info_lbl)
+
+        outer.add_widget(Widget())  # kalan alani doldur
+        self.add_widget(outer)
+
+    def _update_bg(self, *a):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+    def _on_toggle_theme(self, *a):
+        new_theme = "light" if CURRENT_THEME == "dark" else "dark"
+        try:
+            self.measure_screen.save_session()  # once mevcut veriyi kaydet
+        except Exception:
+            pass
+        apply_palette(new_theme)
+        try:
+            self.measure_screen.save_session()  # yeni tema tercihini de kaydet
+        except Exception:
+            pass
+        App.get_running_app().rebuild_ui()
+
+
 class RootLayout(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation="vertical", **kwargs)
@@ -2428,9 +3794,10 @@ class RootLayout(BoxLayout):
         self.sm.add_widget(StandardsScreen(measure_screen=self.measure_screen, name="standards"))
         self.sm.add_widget(ControlScreen(measure_screen=self.measure_screen, name="control"))
         self.sm.add_widget(ReportScreen(measure_screen=self.measure_screen, name="report"))
+        self.sm.add_widget(SettingsScreen(measure_screen=self.measure_screen, name="settings"))
         self.add_widget(self.sm)
 
-        nav_card = Card(bg_color=(0.09, 0.09, 0.10, 1), radius=0, size_hint_y=None,
+        nav_card = Card(bg_color=NAV_BG, radius=0, size_hint_y=None,
                          height=dp(66), padding=[dp(4), dp(6), dp(4), dp(6)])
         nav_row = BoxLayout(spacing=dp(2))
         nav_card.add_widget(nav_row)
@@ -2438,9 +3805,10 @@ class RootLayout(BoxLayout):
         self.tabs = {}
         tab_defs = [
             ("measure", "measure", "Olcum"),
-            ("control", "control", "Kontrol"),
+            ("control", "result", "Sonuc"),
             ("standards", "standards", "Standart"),
             ("report", "report", "Rapor"),
+            ("settings", "settings", "Ayarlar"),
         ]
         for screen_name, icon_kind, label in tab_defs:
             btn = NavButton(icon_kind, label, on_press=lambda sn=screen_name: self.switch_tab(sn))
@@ -2462,7 +3830,18 @@ class RootLayout(BoxLayout):
 
 class AydinlatmaApp(App):
     def build(self):
+        apply_palette(load_saved_theme())
         return RootLayout()
+
+    def rebuild_ui(self):
+        """Tema degistiginde TUM arayuzu (verileri kaybetmeden - oturum
+        dosyasindan geri yukleyerek) yeniden insa eder."""
+        from kivy.core.window import Window
+        old_root = self.root
+        new_root = RootLayout()
+        self.root = new_root
+        Window.remove_widget(old_root)
+        Window.add_widget(new_root)
 
 
 if __name__ == "__main__":
