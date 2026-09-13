@@ -4,7 +4,7 @@ package.name = aydinlatmaolcum
 package.domain = org.kerem
 
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,png,jpg,kv,atlas,ttf
 
 version = 1.0
 
@@ -13,6 +13,8 @@ p4a.source_dir = ./p4a-src
 
 orientation = portrait
 fullscreen = 0
+
+icon.filename = %(source.dir)s/app_icon.png
 
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 android.api = 33
