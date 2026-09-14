@@ -109,6 +109,26 @@ ROW_B = DARK_PALETTE["ROW_B"]
 HEADER_BG = DARK_PALETTE["HEADER_BG"]
 DANGER_TINT = DARK_PALETTE["DANGER_TINT"]
 
+# --- FIBA (basketbol) aydinlatma standardi - FIFA/UEFA'dan YAPISAL olarak farkli:
+# iki ic ice bolge (PPA/TPA), MAUR yok, EH bir ARALIK, EV icin 4-yon dengesi var.
+# Kaynak: FIBA Official Basketball Rules 2024, Bolum 12, Tablo 5-6.
+FIBA_STANDARDS = {
+    "PPA": {  # Ana Oyun Alani - 19m x 32m (sahanin kendisi)
+        "ec_avg": 2000, "ec_u1": 0.7, "ec_u2": 0.8,
+        "ev_avg": 1700, "ev_u1": 0.7, "ev_u2": 0.8, "ev_dir_ratio": 0.6,
+        "eh_avg_min": 1500, "eh_avg_max": 3000, "eh_u1": 0.7, "eh_u2": 0.8,
+    },
+    "TPA": {  # Toplam Oyun Alani - 22m x 35m (saha + 1.5m cevre serit)
+        "ec_avg": 2000, "ec_u1": 0.6, "ec_u2": 0.7,
+        "ev_avg": 1700, "ev_u1": 0.6, "ev_u2": 0.7, "ev_dir_ratio": 0.6,
+        "eh_avg_min": 1500, "eh_avg_max": 3000, "eh_u1": 0.6, "eh_u2": 0.7,
+    },
+    "light_source": {
+        "flicker_max_pct": 1.0, "cri_min": 80,
+        "cct_min": 4000, "cct_max": 6000, "cct_tolerance": 500,
+    },
+}
+
 STANDARDS = {
     "FIFA": {
         "Standard A": {
@@ -672,11 +692,17 @@ class MeasureScreen(Screen):
         self.measure_btn.bind(on_release=self.take_measurement)
         root.add_widget(self.measure_btn)
 
+        # --- FIBA: 1. tur bitince 2. turu (yatay) baslatma butonu ---
+        self.fiba_r2_btn = FlatButton(text="2. Turu Baslat (Yatay Olcum)", bg_color=ACCENT,
+                                       radius=14, font_size=sp(14.5), bold=True,
+                                       size_hint_y=None, height=0, opacity=0, disabled=True)
+        self.fiba_r2_btn.bind(on_release=self._start_fiba_round2)
+        root.add_widget(self.fiba_r2_btn)
+
         # --- Tablo (Konsept 4 stili) ---
         table_card = Card(bg_color=CARD, radius=14, orientation="vertical", padding=0)
         self.header_row = TableRow(HEADER_BG)
-        for h in COL_HEADERS:
-            self.header_row.add_cell(h, color=TEXT_MUTED, bold=True)
+        self._rebuild_table_header()
         table_card.add_widget(self.header_row)
 
         scroll = ScrollView(size_hint=(1, 1))
@@ -692,7 +718,8 @@ class MeasureScreen(Screen):
         outer.add_widget(root)
         self.add_widget(outer)
         self._recompute_sequence(start=False)
-        self.project_info = {"name": "", "location": "", "date": "", "prepared_by": ""}
+        self.project_info = {"name": "", "location": "",
+                              "date": datetime.now().strftime("%d.%m.%Y"), "prepared_by": ""}
         self.fifa_info = {
             "lum1_manufacturer": "", "lum1_model": "",
             "cal_date": "",
@@ -702,6 +729,12 @@ class MeasureScreen(Screen):
             "colour_temp_tc": "", "colour_rendering_ra": "", "glare_rating_rg": "",
         }
         self.report_language = "tr"  # "tr" veya "en" - PDF raporunun dili
+        self.fiba_ppa_margin = 1  # TPA sinirindan PPA'ya kac "halka" ic - varsayilan 1
+        self.ec_values = {}  # idx -> deger: FIBA "EC" (270 probu kameraya cevrilerek, IKINCI Pi olcumu)
+        self.fiba_round = 1  # FIBA: 1=dikey+EC turu, 2=yatay (Eh) turu
+        self.fiba_step = 1  # FIBA 1. Tur icinde: 1=4 dikey olcum bekleniyor, 2=EC (270->kamera) bekleniyor
+        self.fiba_r2_current_index = 0
+        self.fiba_r2_frontier_index = 0
         self.pi_ip = "192.168.0.222"
         self.pi_port = 8899
         self.connection_status = "disconnected"
@@ -736,6 +769,12 @@ class MeasureScreen(Screen):
             "project_info": self.project_info,
             "fifa_info": self.fifa_info,
             "report_language": self.report_language,
+            "fiba_ppa_margin": self.fiba_ppa_margin,
+            "ec_values": {str(k): v for k, v in self.ec_values.items()},
+            "fiba_round": self.fiba_round,
+            "fiba_step": self.fiba_step,
+            "fiba_r2_current_index": self.fiba_r2_current_index,
+            "fiba_r2_frontier_index": self.fiba_r2_frontier_index,
             "pi_ip": self.pi_ip,
             "pi_port": self.pi_port,
             "theme": CURRENT_THEME,
@@ -774,6 +813,13 @@ class MeasureScreen(Screen):
         self.project_info.update(data.get("project_info", {}))
         self.fifa_info.update(data.get("fifa_info", {}))
         self.report_language = data.get("report_language", self.report_language)
+        self.fiba_ppa_margin = data.get("fiba_ppa_margin", self.fiba_ppa_margin)
+        raw_ec = data.get("ec_values", {})
+        self.ec_values = {int(k): v for k, v in raw_ec.items()} if raw_ec else {}
+        self.fiba_round = data.get("fiba_round", 1)
+        self.fiba_step = data.get("fiba_step", 1)
+        self.fiba_r2_current_index = data.get("fiba_r2_current_index", 0)
+        self.fiba_r2_frontier_index = data.get("fiba_r2_frontier_index", 0)
         self.pi_ip = data.get("pi_ip", self.pi_ip)
         self.pi_port = data.get("pi_port", self.pi_port)
         self.grid_value_label.text = f"{self.rows_count_val} x {self.cols_count_val}"
@@ -788,6 +834,7 @@ class MeasureScreen(Screen):
         for idx in sorted(self.measurements.keys()):
             self._render_row(idx)
         self.measure_btn.disabled = False
+        self._update_ec_row_visibility()
         self._update_active_label()
 
     # --- Baglanti durumu kontrolu ---
@@ -922,8 +969,15 @@ class MeasureScreen(Screen):
     def update_standard_badge(self, org, level):
         self.org = org
         self.level = level
-        self.badge_label.text = f"{org} · {level}"
+        self.badge_label.text = f"{org} · {level}" if level else org
+        self._update_ec_row_visibility()
+        self._rebuild_table_header()
+        if hasattr(self, "sequence") and self.sequence:
+            self._update_active_label()
         self.save_session()
+
+    def _update_ec_row_visibility(self):
+        pass  # manuel EC girisi kaldirildi - EC artik ikinci bir Pi olcumuyle otomatik alinir
 
     # --- Izgara duzenleme penceresi ---
     def _open_grid_editor(self):
@@ -1057,8 +1111,13 @@ class MeasureScreen(Screen):
         self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
         self.current_index = 0
         self.frontier_index = 0
+        self.fiba_round = 1
+        self.fiba_step = 1
+        self.fiba_r2_current_index = 0
+        self.fiba_r2_frontier_index = 0
         if clear_table:
             self.measurements = {}
+            self.ec_values = {}
             self.refresh_table()
         if start:
             self.measure_btn.disabled = False
@@ -1067,7 +1126,58 @@ class MeasureScreen(Screen):
             self.active_point_label.text = "Izgarayi baslatin"
             self.measure_btn.disabled = True
 
+    def _fiba_round2_active(self):
+        return self.org == "FIBA" and self.fiba_round == 2
+
+    def _active_seq_index(self):
+        return self.fiba_r2_current_index if self._fiba_round2_active() else self.current_index
+
     def _update_active_label(self):
+        if self.org == "FIBA":
+            if self.fiba_round == 1:
+                editing = self.current_index != self.frontier_index
+                if self.current_index >= len(self.sequence) and not editing:
+                    self.active_point_label.text = "1. Tur tamamlandi - 2. Turu baslatin"
+                    self.measure_btn.disabled = True
+                    self.measure_btn.text = "OLCUM AL"
+                    self._show_fiba_round2_button(True)
+                    return
+                self._show_fiba_round2_button(False)
+                r, c = self.sequence[self.current_index]
+                step = 1 if editing else self.fiba_step
+                if editing:
+                    self.active_point_label.text = f"Yeniden olculuyor: Grid No {self.current_index + 1}"
+                elif step == 1:
+                    self.active_point_label.text = (
+                        f"1.Tur - 4 Dikey: Grid No {self.current_index + 1} "
+                        f"({self.current_index + 1}/{len(self.sequence)})")
+                else:
+                    self.active_point_label.text = (
+                        f"1.Tur - EC (270 probu kameraya cevrilmis): "
+                        f"Grid No {self.current_index + 1}")
+                self.measure_btn.text = "OLCUM AL (4 Dikey)" if step == 1 else "EC OLC (270->Kamera)"
+                self.measure_btn.disabled = False
+                return
+            else:  # fiba_round == 2 (yatay/Eh turu)
+                self._show_fiba_round2_button(False)
+                self.measure_btn.text = "OLCUM AL"
+                editing = self.fiba_r2_current_index != self.fiba_r2_frontier_index
+                if self.fiba_r2_current_index >= len(self.sequence) and not editing:
+                    self.active_point_label.text = "Tamamlandi (2 tur da bitti)"
+                    self.measure_btn.disabled = True
+                    return
+                r, c = self.sequence[self.fiba_r2_current_index]
+                if editing:
+                    self.active_point_label.text = (
+                        f"Yeniden olculuyor (Yatay): Grid No {self.fiba_r2_current_index + 1}")
+                else:
+                    self.active_point_label.text = (
+                        f"2.Tur (Yatay): Grid No {self.fiba_r2_current_index + 1} "
+                        f"({self.fiba_r2_current_index + 1}/{len(self.sequence)})")
+                self.measure_btn.disabled = False
+                return
+
+        self.measure_btn.text = "OLCUM AL"
         editing = self.current_index != self.frontier_index
         if self.current_index >= len(self.sequence) and not editing:
             self.active_point_label.text = "Tamamlandi"
@@ -1080,8 +1190,21 @@ class MeasureScreen(Screen):
             self.active_point_label.text = f"Grid No {self.current_index + 1} ({self.current_index + 1}/{len(self.sequence)})"
         self.measure_btn.disabled = False
 
+    def _show_fiba_round2_button(self, show):
+        self.fiba_r2_btn.height = dp(52) if show else 0
+        self.fiba_r2_btn.opacity = 1 if show else 0
+        self.fiba_r2_btn.disabled = not show
+
+    def _start_fiba_round2(self, *a):
+        self.fiba_round = 2
+        self.fiba_r2_current_index = 0
+        self.fiba_r2_frontier_index = 0
+        self._update_ec_row_visibility()
+        self._update_active_label()
+        self.save_session()
+
     def take_measurement(self, *a):
-        if self.current_index >= len(self.sequence):
+        if self._active_seq_index() >= len(self.sequence):
             return
         self.measure_btn.disabled = True
         self._measure_spinner = TextSpinner(self.measure_btn, "OLCUM ALINIYOR...")
@@ -1118,6 +1241,59 @@ class MeasureScreen(Screen):
                 "Pi'ye baglanildi ama cihazdan\nveri gelmiyor. T-10MA'nin USB\nbaglantisini kontrol edin.")
             return
 
+        if self._fiba_round2_active():
+            idx = self.fiba_r2_current_index
+            if idx >= len(self.sequence):
+                self.measure_btn.disabled = True
+                return
+            r, c = self.sequence[idx]
+            existing = self.measurements.get(idx)
+            existing_values = dict(existing["values"]) if existing and existing["values"] else {
+                "Eh": None, "Ev0": None, "Ev90": None, "Ev180": None, "Ev270": None}
+            existing_values["Eh"] = data.get("Eh")  # SADECE yatay guncellenir - 1. turun dikey/EC verisi korunur
+            is_new = idx == self.fiba_r2_frontier_index
+            self.measurements[idx] = {"r": r, "c": c, "values": existing_values}
+            if is_new:
+                self.fiba_r2_frontier_index += 1
+            self.fiba_r2_current_index = self.fiba_r2_frontier_index
+            self._render_row(idx)
+            self._update_active_label()
+            self.save_session()
+            return
+
+        if self.org == "FIBA" and self.fiba_round == 1:
+            idx = self.current_index
+            if idx >= len(self.sequence):
+                self.measure_btn.disabled = True
+                return
+            r, c = self.sequence[idx]
+            editing = idx != self.frontier_index
+            if self.fiba_step == 1:
+                # ADIM 1: 4 dikey yon (Ev0/90/180/270) - Eh de gelir ama 1. Turda kullanilmaz
+                values = {
+                    "Eh": data.get("Eh"), "Ev0": data.get("Ev0"), "Ev90": data.get("Ev90"),
+                    "Ev180": data.get("Ev180"), "Ev270": data.get("Ev270"),
+                }
+                if idx in self.ec_values:
+                    values["EC"] = self.ec_values[idx]  # onceden girilmis EC'yi KORU
+                self.measurements[idx] = {"r": r, "c": c, "values": values}
+                if not editing:
+                    self.fiba_step = 2  # ayni noktada simdi EC (270->kamera) bekleniyor
+            else:
+                # ADIM 2: 270 probu KAMERAYA cevrilmis - bu ayri fetch'teki Ev270
+                # degeri EC'yi temsil eder (1. adimin Ev270 dikey degerine DOKUNULMAZ)
+                ec_val = data.get("Ev270")
+                self.ec_values[idx] = ec_val
+                self.measurements[idx]["values"]["EC"] = ec_val  # tablo/isi haritasi icin ayna
+                self.fiba_step = 1
+                if not editing and idx == self.frontier_index:
+                    self.frontier_index += 1
+                self.current_index = self.frontier_index
+            self._render_row(idx)
+            self._update_active_label()
+            self.save_session()
+            return
+
         idx = self.current_index
         if idx >= len(self.sequence):
             self.measure_btn.disabled = True
@@ -1132,8 +1308,8 @@ class MeasureScreen(Screen):
         self.measurements[idx] = {"r": r, "c": c, "values": values}
         if is_new and idx == self.frontier_index:
             self.frontier_index += 1
-
         self.current_index = self.frontier_index
+
         self._render_row(idx)
         self._update_active_label()
         self.save_session()
@@ -1159,17 +1335,33 @@ class MeasureScreen(Screen):
         self.table_body.clear_widgets()
         self.row_widgets = {}
 
+    def _current_data_columns(self):
+        """FIFA/UEFA'da 5 sabit prob; FIBA'da ayrica EC (Kafa No.0, kameraya
+        cevrilmis) sutunu da eklenir."""
+        cols = [t for t, _ in PROBES]
+        if self.org == "FIBA":
+            cols = cols + ["EC"]
+        return cols
+
+    def _rebuild_table_header(self):
+        self.header_row.clear_widgets()
+        self.header_row.cell_labels = []
+        for h in ["Grid No"] + self._current_data_columns():
+            self.header_row.add_cell(h, color=TEXT_MUTED, bold=True)
+
     def _render_row(self, idx):
         """Tek bir noktanin satirini olusturur veya (varsa) yerinde gunceller. O(1)."""
         data = self.measurements[idx]
+        cols = self._current_data_columns()
         if idx in self.row_widgets:
             row = self.row_widgets[idx]
             if data["values"] is None:
-                for i in range(1, 6):
+                for i in range(1, len(cols) + 1):
                     row.update_cell(i, "--", color=TEXT_MUTED)
             else:
-                for i, (title, kind) in enumerate(PROBES, start=1):
-                    row.update_cell(i, str(data["values"][title]), color=TEXT)
+                for i, title in enumerate(cols, start=1):
+                    val = data["values"].get(title)
+                    row.update_cell(i, str(val) if val is not None else "--", color=TEXT)
             return
 
         pos = len(self.row_widgets)
@@ -1177,11 +1369,12 @@ class MeasureScreen(Screen):
         row = TableRow(row_bg, point_index=idx, on_tap=self._row_tapped)
         row.add_cell(str(idx + 1), color=TEXT_MUTED)
         if data["values"] is None:
-            for _ in PROBES:
+            for _ in cols:
                 row.add_cell("--", color=TEXT_MUTED)
         else:
-            for title, kind in PROBES:
-                row.add_cell(str(data["values"][title]), color=TEXT, bold=True)
+            for title in cols:
+                val = data["values"].get(title)
+                row.add_cell(str(val) if val is not None else "--", color=TEXT, bold=True)
         self.table_body.add_widget(row)
         self.row_widgets[idx] = row
 
@@ -1208,7 +1401,12 @@ class MeasureScreen(Screen):
 
         def do_remeasure(*a):
             popup.dismiss()
-            self.current_index = point_index
+            if self._fiba_round2_active():
+                self.fiba_r2_current_index = point_index
+            else:
+                self.current_index = point_index
+                if self.org == "FIBA":
+                    self.fiba_step = 1
             self._update_active_label()
         remeasure_btn.bind(on_release=do_remeasure)
         content.add_widget(remeasure_btn)
@@ -1426,7 +1624,7 @@ class StandardsScreen(Screen):
         # --- Organizasyon secici ---
         org_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         self.org_buttons = {}
-        for org_name in STANDARDS.keys():
+        for org_name in list(STANDARDS.keys()) + ["FIBA"]:
             btn = FlatButton(text=org_name, bg_color=CARD_LIGHT, font_size=sp(15))
             btn.bind(on_release=lambda b, o=org_name: self.set_browse_org(o))
             org_row.add_widget(btn)
@@ -1457,11 +1655,20 @@ class StandardsScreen(Screen):
     def set_browse_org(self, org_name):
         self.browse_org = org_name
         for name, btn in self.org_buttons.items():
-            btn.bg_instr.rgba = ACCENT if name == org_name else CARD_LIGHT
-            btn._base_color = ACCENT if name == org_name else CARD_LIGHT
+            new_bg = ACCENT if name == org_name else CARD_LIGHT
+            btn.bg_instr.rgba = new_bg
+            btn._base_color = new_bg
+            btn.color = text_color_for_bg(new_bg)
 
         self.level_list.clear_widgets()
         self.level_cards = {}
+
+        if org_name == "FIBA":
+            self.preview_level = ""
+            self._build_fiba_info_card()
+            self._refresh_selection_marks()
+            return
+
         for level_name, values in STANDARDS[org_name].items():
             card = LevelCard(org_name, level_name, values, on_tap=self.preview_select)
             self.level_list.add_widget(card)
@@ -1474,6 +1681,53 @@ class StandardsScreen(Screen):
             self.preview_level = None
         self._refresh_selection_marks()
 
+    def _build_fiba_info_card(self):
+        ms = self.measure_screen
+        card = Card(bg_color=CARD, radius=14, orientation="vertical", size_hint_y=None,
+                    padding=[dp(16), dp(14), dp(16), dp(14)], spacing=dp(8))
+        card.add_widget(Label(text="FIBA Resmi Basketbol Aydinlatma Standardi", font_size=sp(14),
+                               bold=True, color=TEXT, size_hint_y=None, height=dp(24),
+                               halign="left", text_size=(dp(300), None)))
+        info_text = (
+            "Uc farkli isik turu kontrol edilir:\n\n"
+            "- EC (Kamera): TV kamerasinin gordugu isik. Ortalama en az "
+            "2000 lux olmali.\n\n"
+            "- EV (Dikey): Oyuncularin 4 yonden gorunurlugu. Ortalama en az "
+            "1700 lux olmali. Ayrica 4 yon birbirine yakin olmali (en dusuk "
+            "yonun en yuksek yone orani en az 0.6).\n\n"
+            "- EH (Yatay): Zeminin aydinligi. Ortalama 1500 ile 3000 lux "
+            "ARASINDA olmali - cok fazla parlak olmasi da istenmiyor.\n\n"
+            "Her turun kendi icinde bir de DUZGUNLUK sarti var: en dusuk "
+            "deger / en yuksek deger, ve en dusuk deger / ortalama - ikisi "
+            "de belirli bir esigin uzerinde olmali (yani saha genelinde "
+            "isik cok degisken olmamali).\n\n"
+            "Saha iki ayri bolgeye ayrilarak degerlendirilir:\n"
+            "- PPA: sahanin kendisi (19x32m) - daha sikı kurallar\n"
+            "- TPA: saha + cevresindeki serit (22x35m) - biraz daha esnek\n\n"
+            "Bu standart secildiginde izgara otomatik 17x11 olur. En "
+            "distaki nokta halkasi sadece TPA'yi, ic kisim hem PPA hem "
+            "TPA'yi temsil eder.\n\n"
+            "Isik kaynagi icin ayrica: Titresim en fazla %1, Renk gosterimi "
+            "en az 80, Renk sicakligi 4000-6000K arasinda olmali."
+        )
+        info_lbl = Label(text=info_text, font_size=sp(12), color=TEXT_MUTED,
+                          size_hint_y=None, halign="left", valign="top")
+        info_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        info_lbl.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        card.add_widget(info_lbl)
+
+        ec_note = Label(text="EC (ana kamera) degeri, Olcum ekraninda her nokta icin "
+                              "Alici Kafa No.0 (Eh ile ayni fiziksel prob, kameraya "
+                              "cevrilerek) ile elle girilir.",
+                         font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
+                         halign="left", valign="top")
+        ec_note.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        ec_note.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        card.add_widget(ec_note)
+
+        card.bind(minimum_height=card.setter("height"))
+        self.level_list.add_widget(card)
+
     def preview_select(self, org, level):
         self.browse_org = org
         self.preview_level = level
@@ -1484,18 +1738,30 @@ class StandardsScreen(Screen):
             card.set_selected(name == self.preview_level)
 
     def apply_standard(self, *a):
-        if not self.preview_level:
+        if self.preview_level is None:
             return
         content = PopupContent(padding=dp(18), spacing=dp(16))
         _popup_title_lbl = Label(text="Standardi Uygula", font_size=sp(16), bold=True, color=TEXT,
                                  size_hint_y=None, height=dp(30), halign="left")
         _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
         content.add_widget(_popup_title_lbl)
-        content.add_widget(Label(
-            text=f"Aktif standart\n{self.browse_org} - {self.preview_level}\nolarak degistirilecek. Emin misiniz?",
-            font_size=sp(15), color=TEXT, halign="center"))
+        standard_label = f"{self.browse_org} · {self.preview_level}" if self.preview_level else self.browse_org
+        if self.browse_org == "FIBA":
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nIzgara otomatik olarak 17 x 11 "
+                   "yapilacak ve mevcut olcumler sifirlanacak.\n\nEmin misiniz?")
+        else:
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nIzgara otomatik olarak 12 x 8 "
+                   "(resmi 96 nokta duzeni) yapilacak ve mevcut olcumler "
+                   "sifirlanacak. Istenirse sonradan Izgara Ayarlari'ndan "
+                   "degistirebilirsiniz.\n\nEmin misiniz?")
+        msg_lbl = Label(text=msg, font_size=sp(15), color=TEXT, halign="center", valign="middle")
+        msg_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        content.add_widget(msg_lbl)
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
-        popup = Popup(title="", content=content, size_hint=(0.85, 0.42),
+        popup = Popup(title="", content=content,
+                       size_hint=(0.85, 0.5),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
                        background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
@@ -1504,8 +1770,24 @@ class StandardsScreen(Screen):
 
         def do_confirm(*a):
             popup.dismiss()
-            self.measure_screen.update_standard_badge(self.browse_org, self.preview_level)
-            self.active_label.text = f"{self.browse_org} · {self.preview_level}"
+            ms = self.measure_screen
+            ms.update_standard_badge(self.browse_org, self.preview_level)
+            if self.browse_org == "FIBA":
+                ms.fiba_ppa_margin = 1  # en dis nokta halkasi haric hepsi PPA
+                ms.rows_count_val = 17
+                ms.cols_count_val = 11
+                ms.grid_value_label.text = "17 x 11"
+                ms._recompute_sequence(start=True)
+                ms.save_session()
+            else:
+                # FIFA/UEFA'ya YENI geciliyor (veya FIBA'dan cikiliyor) - resmi
+                # 96 nokta (8x12) duzeni otomatik ayarlanir, istenirse sonra degistirilir
+                ms.rows_count_val = 12
+                ms.cols_count_val = 8
+                ms.grid_value_label.text = "12 x 8"
+                ms._recompute_sequence(start=True)
+                ms.save_session()
+            self.active_label.text = standard_label
         confirm_btn.bind(on_release=do_confirm)
         btn_row.add_widget(cancel_btn)
         btn_row.add_widget(confirm_btn)
@@ -1514,7 +1796,8 @@ class StandardsScreen(Screen):
 
     def on_pre_enter(self, *a):
         # sekmeye her girildiginde aktif standardi tekrar yansit
-        self.active_label.text = f"{self.measure_screen.org} · {self.measure_screen.level}"
+        ms = self.measure_screen
+        self.active_label.text = f"{ms.org} · {ms.level}" if ms.level else ms.org
 
 
 def compute_maur_failures(by_pos, threshold):
@@ -1669,10 +1952,37 @@ class HeatCell(BoxLayout):
         self.rect.size = self.size
 
 
+class GestureAwareScatter(Scatter):
+    """Kivy'nin Scatter'i - ama parmaklarin TAMAMEN kalktigi ani net olarak
+    bilir ve bunu bildirir. Onceki tasarim, parmak hala ekrandayken bir
+    zaman-asimi (debounce) ile isi haritasini YENIDEN INSA ediyordu - bu,
+    Kivy'nin dokunma takibini bozup 'garip, orantisiz kucculme' hissi
+    yaratiyordu (widget jestin ORTASINDA yok edilip yeniden olusturuluyordu).
+    Simdi yeniden insa SADECE gercekten butun parmaklar kalktiginda olur."""
+    def __init__(self, on_gesture_end=None, **kwargs):
+        super().__init__(**kwargs)
+        self.on_gesture_end = on_gesture_end
+        self._active_touch_ids = set()
+
+    def on_touch_down(self, touch):
+        result = super().on_touch_down(touch)
+        if result:
+            self._active_touch_ids.add(touch.uid)
+        return result
+
+    def on_touch_up(self, touch):
+        result = super().on_touch_up(touch)
+        if touch.uid in self._active_touch_ids:
+            self._active_touch_ids.discard(touch.uid)
+            if not self._active_touch_ids and self.on_gesture_end:
+                self.on_gesture_end()
+        return result
+
+
 class ControlScreen(Screen):
     """Kontrol Paneli - DIALux/Relux tarzi pseudo-color isi haritasi."""
 
-    DATASETS = ["Eh", "Ev0", "Ev90", "Ev180", "Ev270"]
+    DATASETS = ["Eh", "Ev0", "Ev90", "Ev180", "Ev270", "EC"]
 
     def __init__(self, measure_screen, **kwargs):
         super().__init__(**kwargs)
@@ -1694,8 +2004,13 @@ class ControlScreen(Screen):
         selector_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(4))
         self.dataset_buttons = {}
         for name in self.DATASETS:
-            btn = FlatButton(text=name, bg_color=CARD_LIGHT, font_size=sp(12.5))
+            display_text = "Kamera" if name == "EC" else name
+            btn = FlatButton(text=display_text, bg_color=CARD_LIGHT, font_size=sp(12.5))
             btn.bind(on_release=lambda b, n=name: self.set_dataset(n))
+            if name == "EC":
+                btn.size_hint_x = 0
+                btn.opacity = 0
+                btn.disabled = True
             selector_row.add_widget(btn)
             self.dataset_buttons[name] = btn
         self.root_box.add_widget(selector_row)
@@ -1748,26 +2063,32 @@ class ControlScreen(Screen):
 
     def _on_scatter_scale(self, scatter, value):
         """Scatter (Kivy'nin resmi pinch/zoom widget'i) her olcek degisiminde
-        bunu cagirir. Anlik geri bildirim (etiket) hemen guncellenir, ama
-        agir yeniden-cizim islemi, parmak biraktiktan ~0.3sn sonra (debounce)
-        TEK SEFERDE yapilir - boylece pinch sirasinda takilma olmaz."""
+        bunu cagirir. SADECE anlik geri bildirim (etiket + bir sonraki
+        deger) burada guncellenir - agir yeniden-cizim ASLA burada
+        tetiklenmez (jestin ortasinda tetiklenirse dokunma takibi bozuluyordu).
+        Gercek yeniden-cizim sadece _on_pinch_gesture_end'de olur."""
         if value == 1.0:
             return
         new_zoom = max(0.5, min(2.6, round(self.zoom * value, 2)))
         self.zoom_label.text = f"{int(new_zoom * 100)}%"
-        if getattr(self, "_pinch_debounce_ev", None):
-            self._pinch_debounce_ev.cancel()
-        self._pinch_debounce_ev = Clock.schedule_once(
-            lambda dt: self._finalize_pinch(new_zoom), 0.3)
+        self._pending_zoom = new_zoom
 
-    def _finalize_pinch(self, new_zoom):
+    def _on_pinch_gesture_end(self):
+        """Butun parmaklar GERCEKTEN kalktiginda cagrilir - tek ve net
+        bir yeniden-cizim burada yapilir."""
+        new_zoom = getattr(self, "_pending_zoom", None)
+        if new_zoom is None or new_zoom == self.zoom:
+            return
         self.zoom = new_zoom
+        self._pending_zoom = None
         self._build_heatmap()  # yeni zoom ile KESKIN/net yeniden ciz
 
     def toggle_maur(self):
         self.maur_mode = not self.maur_mode
-        self.maur_btn.bg_instr.rgba = ACCENT if self.maur_mode else CARD_LIGHT
-        self.maur_btn._base_color = ACCENT if self.maur_mode else CARD_LIGHT
+        new_bg = ACCENT if self.maur_mode else CARD_LIGHT
+        self.maur_btn.bg_instr.rgba = new_bg
+        self.maur_btn._base_color = new_bg
+        self.maur_btn.color = text_color_for_bg(new_bg)
         self.maur_btn.text = f"MAUR Gorunumu: {'Acik' if self.maur_mode else 'Kapali'}"
         self._build_heatmap()
 
@@ -1784,17 +2105,33 @@ class ControlScreen(Screen):
     def _update_button_colors(self):
         for name, btn in self.dataset_buttons.items():
             active = name == self.current_dataset
-            btn.bg_instr.rgba = ACCENT if active else CARD_LIGHT
-            btn._base_color = ACCENT if active else CARD_LIGHT
+            new_bg = ACCENT if active else CARD_LIGHT
+            btn.bg_instr.rgba = new_bg
+            btn._base_color = new_bg
+            btn.color = text_color_for_bg(new_bg)
 
     def on_pre_enter(self, *a):
+        ms = self.measure_screen
+        is_fiba = (ms.org == "FIBA")
+        if is_fiba and self.maur_mode:
+            self.maur_mode = False  # FIBA'da MAUR kavrami yok - zorla kapat
+        self.maur_btn.height = 0 if is_fiba else dp(40)
+        self.maur_btn.opacity = 0 if is_fiba else 1
+        self.maur_btn.disabled = is_fiba
+
+        ec_btn = self.dataset_buttons["EC"]
+        ec_btn.size_hint_x = 1 if is_fiba else 0
+        ec_btn.opacity = 1 if is_fiba else 0
+        ec_btn.disabled = not is_fiba
+        if not is_fiba and self.current_dataset == "EC":
+            self.current_dataset = "Eh"
+        self._update_button_colors()
         self._build_heatmap()
 
     def on_leave(self, *a):
         if getattr(self, "_active_cell", None):
             self._active_cell.stop()
-        if getattr(self, "_pinch_debounce_ev", None):
-            self._pinch_debounce_ev.cancel()
+        self._pending_zoom = None
 
     def _build_heatmap(self):
         if getattr(self, "_active_cell", None):
@@ -1823,9 +2160,14 @@ class ControlScreen(Screen):
         satir_n, sutun_n = ms.rows_count_val, ms.cols_count_val
 
         by_pos = {}
-        for data in ms.measurements.values():
-            if data["values"] is not None:
-                by_pos[(data["r"], data["c"])] = data["values"][self.current_dataset]
+        if self.current_dataset == "EC":
+            for idx, data in ms.measurements.items():
+                if idx in ms.ec_values:
+                    by_pos[(data["r"], data["c"])] = ms.ec_values[idx]
+        else:
+            for data in ms.measurements.values():
+                if data["values"] is not None:
+                    by_pos[(data["r"], data["c"])] = data["values"][self.current_dataset]
 
         if not by_pos:
             msg = Label(text="Henuz olcum yok.\nOlcum Verisi sekmesinden\nizgarayi baslatip olcum alin.",
@@ -1835,7 +2177,7 @@ class ControlScreen(Screen):
             return
 
         vmin, vmax = min(by_pos.values()), max(by_pos.values())
-        thresholds = STANDARDS[ms.org][ms.level]
+        thresholds = STANDARDS.get(ms.org, {}).get(ms.level, {})
 
         # --- KRITIK EKSEN KURALI ---
         # Ekranda: SUTUN sayisi DIKEY (yukaridan asagi), SATIR sayisi YATAY (soldan saga).
@@ -1882,6 +2224,17 @@ class ControlScreen(Screen):
             for gj in range(disp_rows + 1):
                 gy = gj * cell_h
                 Line(points=[0, gy, display_w, gy], width=1.3)
+
+            # --- FIBA aktifse: PPA sinirini kalin, renkli bir cerceveyle goster ---
+            if ms.org == "FIBA":
+                margin = ms.fiba_ppa_margin
+                ppa_x0 = margin * cell_w
+                ppa_y0 = margin * cell_h
+                ppa_w = display_w - 2 * margin * cell_w
+                ppa_h = display_h - 2 * margin * cell_h
+                if ppa_w > 0 and ppa_h > 0:
+                    Color(*ACCENT)
+                    Line(rectangle=(ppa_x0, ppa_y0, ppa_w, ppa_h), width=2.4)
 
         def cell_pos(r, c):
             """Bir (satir, sutun) noktasinin ekran pikseli - yukaridaki ile ayni mantik."""
@@ -2000,13 +2353,17 @@ class ControlScreen(Screen):
                 tag.pos = pos
                 heat_container.add_widget(tag)
 
-        # --- Parmakla zoom (pinch): Kivy'nin KENDI Scatter widget'i, sadece
-        #     olcekleme icin (cevirme/donme kapali) - tek parmak kaydirma
-        #     ScrollView'e dokunulmadan normal calismaya devam eder ---
-        pinch_scatter = Scatter(do_rotation=False, do_translation=False, do_scale=True,
-                                 scale_min=0.5 / max(self.zoom, 0.01),
-                                 scale_max=2.6 / max(self.zoom, 0.01),
-                                 size=(display_w, display_h), size_hint=(None, None))
+        # --- Parmakla zoom (pinch): Kivy'nin Scatter'i - ama SADECE olcekleme
+        #     icin (cevirme/donme kapali) - tek parmak kaydirma ScrollView'e
+        #     dokunulmadan normal calismaya devam eder. Agir yeniden-cizim
+        #     islemi SADECE jest gercekten bittiginde (butun parmaklar
+        #     kalktiginda) yapilir - jestin ortasinda ASLA. ---
+        pinch_scatter = GestureAwareScatter(
+            on_gesture_end=self._on_pinch_gesture_end,
+            do_rotation=False, do_translation=False, do_scale=True,
+            scale_min=0.5 / max(self.zoom, 0.01),
+            scale_max=2.6 / max(self.zoom, 0.01),
+            size=(display_w, display_h), size_hint=(None, None))
         pinch_scatter.add_widget(heat_container)
         pinch_scatter.bind(scale=self._on_scatter_scale)
         self._active_scatter = pinch_scatter
@@ -2057,6 +2414,20 @@ class ControlScreen(Screen):
                           height=VIEWPORT_H + DIR_LABEL_SIZE * 2 + dp(12))
         grid_card.add_widget(grid_frame)
         self.content_area.add_widget(grid_card)
+
+        if ms.org == "FIBA":
+            ppa_note = Card(bg_color=CARD, radius=10, size_hint_y=None, height=dp(36),
+                             padding=[dp(12), 0, dp(12), 0])
+            note_row = BoxLayout(spacing=dp(8))
+            swatch = Widget(size_hint_x=None, width=dp(18))
+            with swatch.canvas:
+                Color(*ACCENT)
+                Line(rectangle=(2, 2, 14, 14), width=2)
+            note_row.add_widget(swatch)
+            note_row.add_widget(Label(text="Mavi cerceve = PPA siniri (disi = TPA)",
+                                       font_size=sp(11.5), color=TEXT_MUTED, halign="left"))
+            ppa_note.add_widget(note_row)
+            self.content_area.add_widget(ppa_note)
 
         # --- MAUR hata listesi + genel dogrulama karti ---
         if self.maur_mode:
@@ -2350,7 +2721,7 @@ class ReportScreen(Screen):
     def _open_fifa_info_popup(self):
         ms = self.measure_screen
         content = PopupContent(padding=dp(16), spacing=dp(10))
-        title = Label(text="FIFA Rapor Bilgileri", font_size=sp(17), bold=True, color=TEXT,
+        title = Label(text="Ek Rapor Bilgileri", font_size=sp(17), bold=True, color=TEXT,
                        size_hint_y=None, height=dp(28))
         content.add_widget(title)
 
@@ -2522,7 +2893,340 @@ class ReportScreen(Screen):
             # gizli-ama-var olan eski konumda kalsin, uygulama çökmesin
             return temp_path
 
+    def _export_pdf_fiba(self):
+        ms = self.measure_screen
+        data = self._compute_fiba_report_data()
+        if not data:
+            self._show_message_popup("PDF", "Once olcum girin, sonra rapor disa aktarilabilir.")
+            return
+        try:
+            from fpdf import FPDF
+        except Exception as e:
+            self._show_message_popup(
+                "PDF Kutuphanesi Sorunu",
+                f"'fpdf2' kutuphanesi yuklenemedi.\n\nTeknik detay:\n{type(e).__name__}: {e}")
+            return
+
+        BRAND = (41, 82, 130)
+        BRAND_TINT = (219, 229, 241)
+        GOOD = (20, 130, 60)
+        BAD = (180, 30, 30)
+        MUTED = (120, 120, 128)
+
+        class BrandedPDF(FPDF):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.header_title = ""
+                self.suppress_header = False
+                self.base_font = "Helvetica"
+
+            def header(self):
+                if self.suppress_header:
+                    return
+                self.set_fill_color(*BRAND)
+                self.rect(0, 0, self.w, 10, style="F")
+                self.set_text_color(255, 255, 255)
+                self.set_font(self.base_font, "B", 8.5)
+                self.set_xy(10, 2.6)
+                self.cell(0, 5, self.header_title, align="L")
+                self.set_text_color(0, 0, 0)
+                self.set_y(15)
+
+            def footer(self):
+                if self.page_no() == 1:
+                    return
+                self.set_y(-12)
+                self.set_font(self.base_font, "", 8)
+                self.set_text_color(*MUTED)
+                self.cell(0, 8, f"Sayfa {self.page_no()}", align="C")
+                self.set_text_color(0, 0, 0)
+
+        try:
+            pdf = BrandedPDF(orientation="P", unit="mm", format="A4")
+            FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+            font_regular = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+            font_bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+            font_italic = os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf")
+            try:
+                if os.path.exists(font_regular) and os.path.exists(font_bold):
+                    pdf.add_font("DejaVu", "", font_regular)
+                    pdf.add_font("DejaVu", "B", font_bold)
+                    pdf.add_font("DejaVu", "I", font_italic if os.path.exists(font_italic) else font_regular)
+                    BASE_FONT = "DejaVu"
+                else:
+                    BASE_FONT = "Helvetica"
+            except Exception:
+                BASE_FONT = "Helvetica"
+            pdf.base_font = BASE_FONT
+
+            proj = data["project_info"]
+            pdf.header_title = proj.get("name") or "Aydinlatma Olcum Raporu (FIBA)"
+
+            # ============================================================
+            # SAYFA 1: KAPAK SAYFASI
+            # ============================================================
+            pdf.suppress_header = True
+            pdf.add_page()
+            pdf.set_fill_color(*BRAND)
+            pdf.rect(0, 0, pdf.w, 7, style="F")
+            pdf.rect(0, pdf.h - 7, pdf.w, 7, style="F")
+            try:
+                pdf.image("/mnt/user-data/outputs/app_icon_print.png",
+                          x=pdf.w / 2 - 18, y=30, w=36, h=36)
+            except Exception:
+                pass
+            pdf.set_y(78)
+            pdf.set_font(BASE_FONT, "B", 21)
+            pdf.set_text_color(25, 28, 33)
+            pdf.cell(0, 11, "AYDINLATMA OLCUM RAPORU", align="C", ln=True)
+            pdf.set_font(BASE_FONT, "", 11)
+            pdf.set_text_color(120, 120, 128)
+            pdf.cell(0, 7, "FIBA Basketbol Sahasi Aydinlatma Standardi", align="C", ln=True)
+            pdf.ln(10)
+            pdf.set_draw_color(*BRAND)
+            pdf.set_line_width(0.6)
+            y_line = pdf.get_y()
+            pdf.line(pdf.w / 2 - 30, y_line, pdf.w / 2 + 30, y_line)
+            pdf.set_draw_color(0, 0, 0)
+            pdf.ln(10)
+            pdf.set_font(BASE_FONT, "B", 18)
+            pdf.set_text_color(20, 22, 26)
+            pdf.multi_cell(0, 9, proj.get("name") or "-", align="C")
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font(BASE_FONT, "", 12)
+            pdf.set_text_color(90, 90, 98)
+            pdf.cell(0, 7, proj.get("location") or "-", align="C", ln=True)
+            pdf.ln(6)
+            pdf.set_font(BASE_FONT, "", 10.5)
+            pdf.set_text_color(70, 70, 78)
+            pdf.cell(0, 6, f"Olcum Tarihi: {proj.get('date') or '-'}", align="C", ln=True)
+            pdf.cell(0, 6, "Karsilastirilan Standart: FIBA", align="C", ln=True)
+            pdf.cell(0, 6, f"Hazirlayan: {proj.get('prepared_by') or '-'}", align="C", ln=True)
+            pdf.set_y(-30)
+            pdf.set_font(BASE_FONT, "", 9)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(0, 5, ORG_NAME, align="C", ln=True)
+            pdf.cell(0, 5, f"Rapor olusturma tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                     align="C", ln=True)
+            pdf.set_text_color(0, 0, 0)
+
+            # ============================================================
+            # SAYFA 2+: PPA / TPA SONUC TABLOLARI
+            # ============================================================
+            pdf.suppress_header = False
+            pdf.add_page()
+            pdf.set_font(BASE_FONT, "B", 16)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 10, "FIBA UYGUNLUK RAPORU", ln=True, align="C")
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+            pdf.set_font(BASE_FONT, "", 10)
+            pdf.cell(0, 6, f"Salon/Tesis: {proj.get('name') or '-'}", ln=True)
+            pdf.cell(0, 6, f"Ulke / Sehir: {proj.get('location') or '-'}", ln=True)
+            pdf.cell(0, 6, f"Olcum Tarihi: {proj.get('date') or '-'}", ln=True)
+            pdf.cell(0, 6, f"Izgara: {data['rows_count']} x {data['cols_count']}   "
+                           f"Olculen: {data['measured_count']}/{data['total_points']}", ln=True)
+            pdf.ln(3)
+
+            verdict_ok = data["all_pass"]
+            pdf.set_fill_color(224, 242, 228) if verdict_ok else pdf.set_fill_color(250, 226, 226)
+            pdf.set_draw_color(*(GOOD if verdict_ok else BAD))
+            pdf.set_line_width(0.4)
+            vy = pdf.get_y()
+            pdf.rect(10, vy, pdf.w - 20, 10, style="DF")
+            pdf.set_xy(10, vy + 1.5)
+            pdf.set_font(BASE_FONT, "B", 12)
+            pdf.set_text_color(*(GOOD if verdict_ok else BAD))
+            pdf.cell(pdf.w - 20, 7, "KRITERLERI KARSILIYOR" if verdict_ok else "KRITERLERI KARSILAMIYOR",
+                     align="C")
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_draw_color(0, 0, 0)
+            pdf.set_line_width(0.2)
+            pdf.set_y(vy + 13)
+
+            zone_titles = {"PPA": "PPA - Ana Oyun Alani (19 x 32m)",
+                           "TPA": "TPA - Toplam Oyun Alani (22 x 35m)"}
+            for zone_name in ["PPA", "TPA"]:
+                zone = data["zones"].get(zone_name)
+                if zone is None:
+                    continue
+                if pdf.get_y() > 240:
+                    pdf.add_page()
+                pdf.set_font(BASE_FONT, "B", 12)
+                pdf.set_fill_color(*BRAND_TINT)
+                pdf.set_text_color(*BRAND)
+                zone_ok = zone["zone_ok"]
+                pdf.cell(0, 8, f"{zone_titles[zone_name]}  -  "
+                               f"{'UYGUN' if zone_ok else 'UYGUN DEGIL'}", border=1, fill=True, ln=True)
+                pdf.set_text_color(0, 0, 0)
+
+                col_w = [70, 35, 35, 40]
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_fill_color(240, 240, 244)
+                for w, h in zip(col_w, ["Metrik", "Ortalama", "U1 (min/maks)", "U2 (min/ort)"]):
+                    pdf.cell(w, 6, h, border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_font(BASE_FONT, "", 9)
+
+                ec = zone["EC"]
+                ec_avg_str = f"{ec['avg']:.0f}" if ec["avg"] is not None else "Olculmedi"
+                pdf.cell(col_w[0], 6, "EC (Kamera)", border=1)
+                pdf.cell(col_w[1], 6, ec_avg_str, border=1, align="C")
+                pdf.set_text_color(*GOOD) if ec["ok"] else pdf.set_text_color(*BAD)
+                pdf.cell(col_w[2], 6, f"{ec['u1']:.2f}" if ec["u1"] is not None else "-", border=1, align="C")
+                pdf.cell(col_w[3], 6, f"{ec['u2']:.2f}" if ec["u2"] is not None else "-", border=1, align="C")
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln()
+
+                for d_name, d_res in zone["EV"]["per_direction"].items():
+                    pdf.cell(col_w[0], 6, f"EV {d_name}", border=1)
+                    pdf.cell(col_w[1], 6, f"{d_res['avg']:.0f}", border=1, align="C")
+                    pdf.set_text_color(*GOOD) if d_res["ok"] else pdf.set_text_color(*BAD)
+                    pdf.cell(col_w[2], 6, f"{d_res['u1']:.2f}", border=1, align="C")
+                    pdf.cell(col_w[3], 6, f"{d_res['u2']:.2f}", border=1, align="C")
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.ln()
+
+                pdf.cell(col_w[0], 6, "EV yon dengesi (min/maks)", border=1)
+                pdf.set_text_color(*GOOD) if zone["EV"]["dir_ratio_ok"] else pdf.set_text_color(*BAD)
+                pdf.cell(col_w[1] + col_w[2] + col_w[3], 6, f"{zone['EV']['dir_ratio']:.2f}",
+                         border=1, align="C")
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln()
+
+                eh = zone["EH"]
+                pdf.cell(col_w[0], 6, "EH (Yatay, 1500-3000 araligi)", border=1)
+                pdf.cell(col_w[1], 6, f"{eh['avg']:.0f}", border=1, align="C")
+                pdf.set_text_color(*GOOD) if eh["ok"] else pdf.set_text_color(*BAD)
+                pdf.cell(col_w[2], 6, f"{eh['u1']:.2f}", border=1, align="C")
+                pdf.cell(col_w[3], 6, f"{eh['u2']:.2f}", border=1, align="C")
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(9)
+
+            # ============================================================
+            # HAM OLCUM VERILERI (EC dahil)
+            # ============================================================
+            raw_seq = data["raw_sequence"]
+            raw_meas = data["raw_measurements"]
+            pdf.add_page()
+            pdf.set_font(BASE_FONT, "B", 14)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 10, "Ham Olcum Verileri", ln=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+            fiba_cols = [t for t, _ in PROBES] + ["EC"]
+            headers_raw = ["Grid No"] + fiba_cols
+            col_w_raw = [18, 27, 27, 27, 27, 27, 27]
+
+            def raw_header_row():
+                pdf.set_font(BASE_FONT, "B", 8.5)
+                pdf.set_fill_color(*BRAND)
+                pdf.set_text_color(255, 255, 255)
+                for w, h in zip(col_w_raw, headers_raw):
+                    pdf.cell(w, 7, h, border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_text_color(0, 0, 0)
+
+            raw_header_row()
+            pdf.set_font(BASE_FONT, "", 8.5)
+            row_i = 0
+            for idx in range(len(raw_seq)):
+                d = raw_meas.get(idx)
+                if d is None:
+                    continue
+                if pdf.get_y() > 270:
+                    pdf.add_page()
+                    raw_header_row()
+                    pdf.set_font(BASE_FONT, "", 8.5)
+                pdf.set_fill_color(*(BRAND_TINT if row_i % 2 == 0 else (255, 255, 255)))
+                pdf.cell(col_w_raw[0], 6, str(idx + 1), border=1, align="C", fill=True)
+                for w, title in zip(col_w_raw[1:], fiba_cols):
+                    val = d["values"].get(title)
+                    pdf.cell(w, 6, f"{val}" if val is not None else "-", border=1, align="C", fill=True)
+                pdf.ln()
+                row_i += 1
+
+            # ============================================================
+            # ISI HARITALARI (Eh, Ev0-270, EC - 6 sayfa)
+            # ============================================================
+            rows_n = data["rows_count"]
+            cols_n = data["cols_count"]
+            for title in fiba_cols:
+                grid = self._dataset_grid(raw_meas, rows_n, cols_n, title)
+                vals = [v for row_vals in grid for v in row_vals if v is not None]
+                if not vals:
+                    continue
+                vmin_g, vmax_g = min(vals), max(vals)
+                pdf.add_page()
+                pdf.set_font(BASE_FONT, "B", 14)
+                pdf.set_text_color(*BRAND)
+                heat_title = "Kamera (EC)" if title == "EC" else title
+                pdf.cell(0, 10, f"Isi Haritasi - {heat_title}", ln=True)
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(2)
+
+                avail_w = 190
+                cell_w = min(avail_w / rows_n, 16)
+                cell_h = min(200 / cols_n, 11)
+                start_x = pdf.get_x()
+                start_y = pdf.get_y()
+                for c_idx, row_vals in enumerate(grid):
+                    for r_idx, val in enumerate(row_vals):
+                        x = start_x + r_idx * cell_w
+                        y = start_y + c_idx * cell_h
+                        if val is None:
+                            pdf.set_fill_color(230, 230, 230)
+                            pdf.set_draw_color(255, 255, 255)
+                            pdf.rect(x, y, cell_w, cell_h, style="DF")
+                            continue
+                        rgba = lux_color(val, vmin_g, vmax_g)
+                        pdf.set_fill_color(int(rgba[0]*255), int(rgba[1]*255), int(rgba[2]*255))
+                        pdf.set_draw_color(255, 255, 255)
+                        pdf.rect(x, y, cell_w, cell_h, style="DF")
+                        txt_rgba = text_color_for_bg(rgba)
+                        pdf.set_text_color(int(txt_rgba[0]*255), int(txt_rgba[1]*255), int(txt_rgba[2]*255))
+                        pdf.set_xy(x, y + cell_h / 2 - 1.6)
+                        pdf.set_font(BASE_FONT, "B", 5.5)
+                        pdf.cell(cell_w, 3.2, f"{val:.0f}", align="C")
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_draw_color(0, 0, 0)
+
+                legend_y = start_y + cols_n * cell_h + 6
+                legend_w = min(avail_w, rows_n * cell_w)
+                steps = 50
+                seg_w = legend_w / steps
+                for i in range(steps):
+                    tt = i / (steps - 1)
+                    color = lux_color(vmin_g + tt * (vmax_g - vmin_g), vmin_g, vmax_g)
+                    pdf.set_fill_color(int(color[0]*255), int(color[1]*255), int(color[2]*255))
+                    pdf.rect(start_x + i * seg_w, legend_y, seg_w + 0.4, 5, style="F")
+                pdf.set_draw_color(180, 180, 180)
+                pdf.rect(start_x, legend_y, legend_w, 5, style="D")
+                pdf.set_draw_color(0, 0, 0)
+                pdf.set_font(BASE_FONT, "", 8)
+                pdf.set_text_color(100, 100, 105)
+                for i in range(5):
+                    tt = i / 4
+                    val_tick = vmin_g + tt * (vmax_g - vmin_g)
+                    tx = start_x + tt * legend_w
+                    pdf.set_xy(tx - 10, legend_y + 6)
+                    align = "L" if i == 0 else ("R" if i == 4 else "C")
+                    pdf.cell(20, 5, f"{val_tick:.0f}", align=align)
+                pdf.set_text_color(0, 0, 0)
+
+            fname = f"aydinlatma_raporu_FIBA_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            fpath = os.path.join(self._export_dir(), fname)
+            pdf.output(fpath)
+            final_location = self._publish_to_downloads(fpath, fname, "application/pdf")
+            self._show_message_popup("PDF Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+        except Exception as e:
+            self._show_message_popup("PDF Hatasi", f"PDF olusturulurken bir sorun olustu:\n{e}")
+
     def export_pdf(self):
+        ms = self.measure_screen
+        if ms.org == "FIBA":
+            self._export_pdf_fiba()
+            return
         data = self._compute_report_data()
         if not data:
             self._show_message_popup("PDF", "Once olcum girin, sonra rapor disa aktarilabilir.")
@@ -3238,6 +3942,14 @@ class ReportScreen(Screen):
             self._show_message_popup(t("pdf_error"), f"{t('pdf_error_msg')}:\n{e}")
 
     def export_excel(self):
+        ms = self.measure_screen
+        if ms.org == "FIBA":
+            self._show_message_popup(
+                "Excel (FIBA)",
+                "FIBA standardi icin Excel disa aktarma yakinda eklenecek.\n"
+                "Sonuclari su an icin Rapor sekmesinde goruntuleyebilir\n"
+                "veya 'Verileri Disa Aktar' ile ham veriyi yedekleyebilirsiniz.")
+            return
         data = self._compute_report_data()
         if not data:
             self._show_message_popup("Excel", "Once olcum girin, sonra rapor disa aktarilabilir.")
@@ -3373,6 +4085,96 @@ class ReportScreen(Screen):
         except Exception as e:
             self._show_message_popup("Excel Hatasi", f"Excel olusturulurken bir sorun olustu:\n{e}")
 
+    def _build_fiba_report_section(self, measured, total_points):
+        ms = self.measure_screen
+        data = self._compute_fiba_report_data()
+        if not data:
+            return
+
+        info_card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                          padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(4),
+                          size_hint_y=None)
+        standard_text = f"Standart: FIBA - {data['level']}" if data['level'] else "Standart: FIBA"
+        info_card.add_widget(Label(text=standard_text, font_size=sp(14),
+                                    bold=True, color=TEXT, size_hint_y=None, height=dp(22),
+                                    halign="left", text_size=(dp(300), None)))
+        is_incomplete = len(measured) < total_points
+        count_color = RED_TXT if is_incomplete else GREEN_TXT
+        count_label = Label(text=f"Izgara: {ms.rows_count_val} x {ms.cols_count_val}   |   "
+                                  f"Olculen: {len(measured)}/{total_points} nokta"
+                                  + ("  (EKSIK)" if is_incomplete else ""),
+                             font_size=sp(12.5), color=count_color, bold=is_incomplete,
+                             size_hint_y=None, height=dp(20), halign="left",
+                             text_size=(dp(300), None))
+        info_card.add_widget(count_label)
+        cam_label = Label(text=f"PPA Kenar Payi: {data['ppa_margin']} halka   |   "
+                                f"EC: Alici Kafa No.0 (elle girilir)",
+                           font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
+                           height=dp(18), halign="left", text_size=(dp(300), None))
+        info_card.add_widget(cam_label)
+        info_card.bind(minimum_height=info_card.setter("height"))
+        self.content_area.add_widget(info_card)
+
+        verdict_ok = data["all_pass"]
+        verdict_card = Card(bg_color=SUCCESS_TINT if verdict_ok else DANGER_TINT,
+                             border_color=SUCCESS if verdict_ok else DANGER, radius=14,
+                             size_hint_y=None, height=dp(46))
+        verdict_lbl = Label(text="KRITERLERI KARSILIYOR" if verdict_ok else "KRITERLERI KARSILAMIYOR",
+                             font_size=sp(15), bold=True,
+                             color=GREEN_TXT if verdict_ok else RED_TXT)
+        verdict_card.add_widget(verdict_lbl)
+        self.content_area.add_widget(verdict_card)
+
+        zone_titles = {"PPA": "PPA - Ana Oyun Alani", "TPA": "TPA - Toplam Oyun Alani"}
+        for zone_name in ["PPA", "TPA"]:
+            zone = data["zones"].get(zone_name)
+            if zone is None:
+                continue
+            zone_card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                              padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(8),
+                              size_hint_y=None)
+            zone_ok = zone["zone_ok"]
+            zone_card.add_widget(Label(
+                text=f"{zone_titles[zone_name]}  ({'UYGUN' if zone_ok else 'UYGUN DEGIL'})",
+                font_size=sp(14), bold=True, color=GREEN_TXT if zone_ok else RED_TXT,
+                size_hint_y=None, height=dp(22), halign="left", text_size=(dp(300), None)))
+
+            def metric_row(label, val_str, ok):
+                row = BoxLayout(size_hint_y=None, height=dp(22))
+                row.add_widget(Label(text=label, font_size=sp(12), color=TEXT_MUTED,
+                                      halign="left", size_hint_x=0.6))
+                row.add_widget(Label(text=val_str, font_size=sp(12), bold=True,
+                                      color=GREEN_TXT if ok else RED_TXT, halign="right"))
+                return row
+
+            ec = zone["EC"]
+            if ec["avg"] is not None:
+                ec_val_str = f"{ec['avg']:.0f} / {ec['u1']:.2f} / {ec['u2']:.2f}"
+            else:
+                ec_val_str = f"Olculmedi (0/{ec['total_count']})"
+            zone_card.add_widget(metric_row("EC ort/U1/U2", ec_val_str, ec["ok"]))
+            if ec["avg"] is not None and ec["measured_count"] < ec["total_count"]:
+                zone_card.add_widget(Label(
+                    text=f"(EC: {ec['measured_count']}/{ec['total_count']} nokta olculdu)",
+                    font_size=sp(10.5), color=TEXT_MUTED, size_hint_y=None, height=dp(16),
+                    halign="left"))
+
+            for d_name, d_res in zone["EV"]["per_direction"].items():
+                zone_card.add_widget(metric_row(
+                    f"EV {d_name} ort/U1/U2",
+                    f"{d_res['avg']:.0f} / {d_res['u1']:.2f} / {d_res['u2']:.2f}", d_res["ok"]))
+            zone_card.add_widget(metric_row(
+                "EV yon dengesi (min/maks)",
+                f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"]))
+
+            eh = zone["EH"]
+            zone_card.add_widget(metric_row(
+                "EH ort (1500-3000 araligi) /U1/U2",
+                f"{eh['avg']:.0f} / {eh['u1']:.2f} / {eh['u2']:.2f}", eh["ok"]))
+
+            zone_card.bind(minimum_height=zone_card.setter("height"))
+            self.content_area.add_widget(zone_card)
+
     def _compute_report_data(self):
         """Rapor icin tum hesaplamalari yapar - hem ekran hem PDF/Excel disa aktarimi bunu kullanir."""
         ms = self.measure_screen
@@ -3470,9 +4272,110 @@ class ReportScreen(Screen):
             "cols_count": ms.cols_count_val,
         }
 
+    def _compute_fiba_report_data(self):
+        """FIBA icin ayri bir hesaplama - PPA/TPA iki ic ice bolge, MAUR yok,
+        EH bir ARALIK, EV icin 4-yon dengesi var. FIFA/UEFA modeliyle
+        KARISTIRILMAMALI - yapisi gercekten farkli (bkz. FIBA Official
+        Basketball Rules 2024, Bolum 12)."""
+        ms = self.measure_screen
+        measured = {idx: d for idx, d in ms.measurements.items() if d["values"] is not None}
+        if not measured:
+            return None
+
+        rows_n, cols_n = ms.rows_count_val, ms.cols_count_val
+        margin = max(0, min(ms.fiba_ppa_margin, (min(rows_n, cols_n) - 1) // 2))
+
+        def in_ppa(r, c):
+            return margin <= r < rows_n - margin and margin <= c < cols_n - margin
+
+        zone_points = {
+            "PPA": {idx: d for idx, d in measured.items() if in_ppa(d["r"], d["c"])},
+            "TPA": measured,
+        }
+
+        ev_dirs = ["Ev0", "Ev90", "Ev180", "Ev270"]
+        zones_result = {}
+        all_pass = True
+        for zone_name, pts in zone_points.items():
+            if not pts:
+                zones_result[zone_name] = None
+                continue
+            th = FIBA_STANDARDS[zone_name]
+            zone_data = {}
+
+            # --- EC: AYRI, elle girilen tek-prob olcumu (ms.ec_values) ---
+            ec_vals = [ms.ec_values[idx] for idx in pts.keys() if idx in ms.ec_values]
+            ec_measured_count = len(ec_vals)
+            if ec_vals:
+                ec_avg = sum(ec_vals) / len(ec_vals)
+                ec_min, ec_max = min(ec_vals), max(ec_vals)
+                ec_u1 = (ec_min / ec_max) if ec_max else 0
+                ec_u2 = (ec_min / ec_avg) if ec_avg else 0
+                ec_ok = ec_avg >= th["ec_avg"] and ec_u1 >= th["ec_u1"] and ec_u2 >= th["ec_u2"]
+            else:
+                ec_avg = ec_min = ec_max = ec_u1 = ec_u2 = None
+                ec_ok = False
+            zone_data["EC"] = {"avg": ec_avg, "min": ec_min, "max": ec_max,
+                                "u1": ec_u1, "u2": ec_u2, "ok": ec_ok,
+                                "measured_count": ec_measured_count, "total_count": len(pts)}
+
+            # --- EV: 4 yonun HER BIRI icin ayri ayri + yonler arasi denge ---
+            ev_dir_avgs = {}
+            ev_per_dir = {}
+            ev_all_ok = True
+            for d_name in ev_dirs:
+                vals = [d["values"][d_name] for d in pts.values()]
+                avg = sum(vals) / len(vals)
+                vmin, vmax = min(vals), max(vals)
+                u1 = (vmin / vmax) if vmax else 0
+                u2 = (vmin / avg) if avg else 0
+                ok = avg >= th["ev_avg"] and u1 >= th["ev_u1"] and u2 >= th["ev_u2"]
+                if not ok:
+                    ev_all_ok = False
+                ev_per_dir[d_name] = {"avg": avg, "min": vmin, "max": vmax,
+                                       "u1": u1, "u2": u2, "ok": ok}
+                ev_dir_avgs[d_name] = avg
+            dir_ratio = min(ev_dir_avgs.values()) / max(ev_dir_avgs.values()) if max(ev_dir_avgs.values()) else 0
+            dir_ratio_ok = dir_ratio >= th["ev_dir_ratio"]
+            if not dir_ratio_ok:
+                ev_all_ok = False
+            zone_data["EV"] = {"per_direction": ev_per_dir, "dir_ratio": dir_ratio,
+                                "dir_ratio_ok": dir_ratio_ok, "ok": ev_all_ok}
+
+            # --- EH: ortalama bir ARALIK icinde olmali (tek bir minimum degil) ---
+            eh_vals = [d["values"]["Eh"] for d in pts.values()]
+            eh_avg = sum(eh_vals) / len(eh_vals)
+            eh_min, eh_max = min(eh_vals), max(eh_vals)
+            eh_u1 = (eh_min / eh_max) if eh_max else 0
+            eh_u2 = (eh_min / eh_avg) if eh_avg else 0
+            eh_avg_ok = th["eh_avg_min"] <= eh_avg <= th["eh_avg_max"]
+            eh_ok = eh_avg_ok and eh_u1 >= th["eh_u1"] and eh_u2 >= th["eh_u2"]
+            zone_data["EH"] = {"avg": eh_avg, "min": eh_min, "max": eh_max,
+                                "u1": eh_u1, "u2": eh_u2, "avg_ok": eh_avg_ok, "ok": eh_ok}
+
+            zone_ok = ec_ok and ev_all_ok and eh_ok
+            zone_data["zone_ok"] = zone_ok
+            if not zone_ok:
+                all_pass = False
+            zones_result[zone_name] = zone_data
+
+        return {
+            "project_info": dict(ms.project_info),
+            "fifa_info": dict(ms.fifa_info),
+            "org": "FIBA", "level": "",
+            "ppa_margin": margin,
+            "zones": zones_result,
+            "all_pass": all_pass,
+            "measured_count": len(measured), "total_points": len(ms.sequence),
+            "rows_count": rows_n, "cols_count": cols_n,
+            "raw_sequence": list(ms.sequence),
+            "raw_measurements": {idx: dict(d) for idx, d in measured.items()},
+        }
+
     def _dataset_grid(self, raw_measurements, rows_n, cols_n, dataset_key):
         """Kontrol Panelindeki gorsel duzenle BIREBIR eslesen 2D veri gridi olusturur.
         Donen: grid[sutun_index][satir_index] = deger (sutun=0 en ustte, satir=0 en solda)."""
+
         grid = [[None] * rows_n for _ in range(cols_n)]
         for idx, d in raw_measurements.items():
             r, c = d["r"], d["c"]
@@ -3516,7 +4419,7 @@ class ReportScreen(Screen):
         proj_card.bind(minimum_height=proj_card.setter("height"))
         self.content_area.add_widget(proj_card)
 
-        fifa_btn = FlatButton(text="FIFA Rapor Bilgilerini Duzenle", bg_color=ACCENT,
+        fifa_btn = FlatButton(text="Ek Rapor Bilgilerini Duzenle", bg_color=ACCENT,
                                font_size=sp(13), bold=True, size_hint_y=None, height=dp(46))
         fifa_btn.bind(on_release=lambda b: self._open_fifa_info_popup())
         self.content_area.add_widget(fifa_btn)
@@ -3533,17 +4436,6 @@ class ReportScreen(Screen):
         lang_row.add_widget(self.lang_btn)
         self.content_area.add_widget(lang_row)
 
-        data_btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-        export_data_btn = FlatButton(text="Verileri Disa Aktar", bg_color=CARD_LIGHT,
-                                      font_size=sp(12.5), bold=True)
-        export_data_btn.bind(on_release=lambda b: self.export_data_json())
-        import_data_btn = FlatButton(text="Verileri Ice Aktar", bg_color=CARD_LIGHT,
-                                      font_size=sp(12.5), bold=True)
-        import_data_btn.bind(on_release=lambda b: self.import_data_json())
-        data_btn_row.add_widget(export_data_btn)
-        data_btn_row.add_widget(import_data_btn)
-        self.content_area.add_widget(data_btn_row)
-
         measured = {idx: d for idx, d in ms.measurements.items() if d["values"] is not None}
         total_points = len(ms.sequence)
 
@@ -3553,6 +4445,10 @@ class ReportScreen(Screen):
                         size_hint_y=None, height=dp(70))
             msg.bind(size=lambda i, v: setattr(i, "text_size", v))
             self.content_area.add_widget(msg)
+            return
+
+        if ms.org == "FIBA":
+            self._build_fiba_report_section(measured, total_points)
             return
 
         thresholds = STANDARDS[ms.org][ms.level]
@@ -3750,6 +4646,33 @@ class SettingsScreen(Screen):
         about_card.add_widget(about_row("Gelistiren", "Kerem Akgun"))
         about_card.add_widget(about_row("Cihaz", "Konica Minolta T-10MA"))
         outer.add_widget(about_card)
+
+        # --- Veri Yonetimi: tum olcum verisini disa/ice aktar ---
+        data_section_lbl = Label(text="VERI YONETIMI", font_size=sp(12), color=TEXT_MUTED, bold=True,
+                                  size_hint_y=None, height=dp(24), halign="left")
+        data_section_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(data_section_lbl)
+
+        data_info_lbl = Label(text="Tum olcum verisini (proje, izgara, FIFA bilgileri dahil) "
+                                    "yedekleyin veya daha once yedeklenmis bir dosyayi geri yukleyin.",
+                               font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None, height=dp(36),
+                               halign="left", valign="top")
+        data_info_lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        outer.add_widget(data_info_lbl)
+
+        def get_report_screen():
+            return App.get_running_app().root.sm.get_screen("report")
+
+        data_btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        export_data_btn = FlatButton(text="Verileri Disa Aktar", bg_color=CARD_LIGHT,
+                                      font_size=sp(12.5), bold=True)
+        export_data_btn.bind(on_release=lambda b: get_report_screen().export_data_json())
+        import_data_btn = FlatButton(text="Verileri Ice Aktar", bg_color=CARD_LIGHT,
+                                      font_size=sp(12.5), bold=True)
+        import_data_btn.bind(on_release=lambda b: get_report_screen().import_data_json())
+        data_btn_row.add_widget(export_data_btn)
+        data_btn_row.add_widget(import_data_btn)
+        outer.add_widget(data_btn_row)
 
         # --- Bilgi notu (ileride baska ayarlar buraya eklenecek) ---
         info_lbl = Label(text="Daha fazla ayar yakinda eklenecek.",
