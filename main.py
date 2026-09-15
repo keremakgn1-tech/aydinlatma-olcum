@@ -2604,8 +2604,18 @@ class ControlScreen(Screen):
 
         def build_summary_card(title, pos_values):
             vals = list(pos_values)
+            card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                        size_hint_y=None, padding=[dp(16), dp(12), dp(16), dp(12)],
+                        spacing=dp(6))
+            card.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT,
+                                   size_hint_y=None, height=dp(24), halign="left",
+                                   text_size=(dp(300), None)))
             if not vals:
-                return None
+                card.add_widget(Label(text="Bu bolgede henuz olcum yok.", font_size=sp(13),
+                                       color=TEXT_MUTED, size_hint_y=None, height=dp(24),
+                                       halign="left", text_size=(dp(300), None)))
+                card.bind(minimum_height=card.setter("height"))
+                return card
             avg = sum(vals) / len(vals)
             vmn = min(vals)
             vmx = max(vals)
@@ -2613,12 +2623,6 @@ class ControlScreen(Screen):
             ud = vmn / vmx if vmx else 0
             uo_ratio = (avg / vmn) if vmn else 0
             ud_ratio = (vmx / vmn) if vmn else 0
-            card = Card(bg_color=CARD, radius=14, orientation="vertical",
-                        size_hint_y=None, padding=[dp(16), dp(12), dp(16), dp(12)],
-                        spacing=dp(6))
-            card.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT,
-                                   size_hint_y=None, height=dp(24), halign="left",
-                                   text_size=(dp(300), None)))
             card.add_widget(summary_row("Ortalama aydinlatma", "E\u0304m", f"{avg:.0f} lx"))
             card.add_widget(summary_row("Minimum aydinlatma", "Emin", f"{vmn:.0f} lx"))
             card.add_widget(summary_row("Maksimum aydinlatma", "Emax", f"{vmx:.0f} lx"))
