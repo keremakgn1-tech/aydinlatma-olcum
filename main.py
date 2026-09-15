@@ -171,6 +171,53 @@ STANDARDS = {
             "cct": "4500-6200K", "ra": 70, "rg": "< 50",
             "mf": "0.90 (LED)   0.80 (HID)",
         },
+        # --- Grade 1/2/3: FIFA ANTRENMAN SAHASI standartlari - MAC sahasindan
+        # FARKLI (yon-bazli, asimetrik gereksinimler). Kaynak: FIFA Lighting
+        # Guide, Bolum 1.36-1.39, Tablo (Grade 3/2/1). ---
+        "Grade 1": {
+            # FIFA Dunya Kupasi Antrenman Sahasi - 96 nokta izgara (12x8)
+            "Eh_avg": 750, "u1h": 0.40, "u2h": 0.60,
+            "Ev0_min": 350, "Ev0_avg": 500, "Ev0_u1": 0.30, "Ev0_u2": 0.40,
+            "Ev90_min": 350, "Ev90_avg": 500, "Ev90_u1": 0.30, "Ev90_u2": 0.40,
+            "Ev180_min": 350, "Ev180_avg": 500, "Ev180_u1": 0.30, "Ev180_u2": 0.40,
+            "Ev270_min": 350, "Ev270_avg": 500, "Ev270_u1": 0.30, "Ev270_u2": 0.40,
+            "mcm": "Gecerli degil (antrenman sahasi)",
+            "ff": "< %1",
+            "maur": "belirtilmemis (MAUR bu standartta yok)",
+            "maur_ratio": None, "maur_max_fail": None,
+            "cct": "5000-6200K", "ra": 80, "rg": "< 50",
+            "mf": "0.90 (LED)   0.80 (HID)",
+            "reference_grid": "96 nokta (12 x 8)",
+            "auto_grid": (12, 8),
+        },
+        "Grade 2": {
+            # FIFA Mac Pratigi Antrenman Sahasi - 40 nokta izgara (8x5)
+            "Eh_avg": 500, "u1h": 0.40, "u2h": 0.60,
+            "Ev90_min": 275, "Ev90_avg": 400, "Ev90_u1": 0.30, "Ev90_u2": 0.40,
+            "Ev270_min": 275, "Ev270_avg": 400, "Ev270_u1": 0.30, "Ev270_u2": 0.40,
+            "mcm": "Gecerli degil (antrenman sahasi)",
+            "ff": "belirtilmemis",
+            "maur": "belirtilmemis (MAUR bu standartta yok)",
+            "maur_ratio": None, "maur_max_fail": None,
+            "cct": "5000-6200K", "ra": 70, "rg": "< 50",
+            "mf": "0.90 (LED)   0.80 (HID)",
+            "reference_grid": "40 nokta (8 x 5)",
+            "auto_grid": (8, 5),
+        },
+        "Grade 3": {
+            # FIFA Standart Antrenman Sahasi - 40 nokta izgara (8x5)
+            "Eh_avg": 300, "u1h": 0.40, "u2h": 0.60,
+            "Ev90_min": 150, "Ev90_avg": 200, "Ev90_u1": 0.30, "Ev90_u2": 0.40,
+            "Ev270_min": 150, "Ev270_avg": 200, "Ev270_u1": 0.30, "Ev270_u2": 0.40,
+            "mcm": "Gecerli degil (antrenman sahasi)",
+            "ff": "belirtilmemis",
+            "maur": "belirtilmemis (MAUR bu standartta yok)",
+            "maur_ratio": None, "maur_max_fail": None,
+            "cct": "4200-6200K", "ra": 70, "rg": "< 50",
+            "mf": "0.90 (LED)   0.80 (HID)",
+            "reference_grid": "40 nokta (8 x 5)",
+            "auto_grid": (8, 5),
+        },
     },
     "UEFA": {
         "Elite Level A": {
@@ -1269,9 +1316,10 @@ class MeasureScreen(Screen):
             r, c = self.sequence[idx]
             editing = idx != self.frontier_index
             if self.fiba_step == 1:
-                # ADIM 1: 4 dikey yon (Ev0/90/180/270) - Eh de gelir ama 1. Turda kullanilmaz
+                # ADIM 1: SADECE 4 dikey yon (Ev0/90/180/270). Eh BOS birakilir -
+                # gercek yatay deger sadece 2. Turda (zemin seviyesinde) olculur.
                 values = {
-                    "Eh": data.get("Eh"), "Ev0": data.get("Ev0"), "Ev90": data.get("Ev90"),
+                    "Eh": None, "Ev0": data.get("Ev0"), "Ev90": data.get("Ev90"),
                     "Ev180": data.get("Ev180"), "Ev270": data.get("Ev270"),
                 }
                 if idx in self.ec_values:
@@ -1509,23 +1557,43 @@ class LevelCard(BoxLayout):
         top_row.add_widget(dot_wrap)
         self.add_widget(top_row)
 
-        if values["Eh_min"] is not None:
-            eh_line = f"1. Eh (yatay):  min {values['Eh_min']} lx / ort {values['Eh_avg']} lx"
+        is_training_grade = "Ev_avg" not in values  # Grade 1/2/3: yon-bazli, simetrik degil
+
+        eh_min_v = values.get("Eh_min")
+        if eh_min_v is not None:
+            eh_line = f"1. Eh (yatay):  min {eh_min_v} lx / ort {values['Eh_avg']} lx"
         else:
             eh_line = f"1. Eh (yatay):  ort >= {values['Eh_avg']} lx"
         uh_line = f"    Duzgunluk: U1h >= {values['u1h']}   U2h >= {values['u2h']}"
 
-        ev_line = f"2. Ev (0/90/180/270 - hepsi ayni):  min {values['Ev_min']} lx / ort {values['Ev_avg']} lx"
-        if values['u1v'] is not None:
-            uv_line = f"    Duzgunluk: U1v >= {values['u1v']}   U2v >= {values['u2v']}"
+        if is_training_grade:
+            dir_lines = []
+            for d_title in ["Ev0", "Ev90", "Ev180", "Ev270"]:
+                d_avg = values.get(f"{d_title}_avg")
+                if d_avg is None:
+                    dir_lines.append(f"    {d_title}: gereksinim yok")
+                else:
+                    d_min = values.get(f"{d_title}_min")
+                    dir_lines.append(f"    {d_title}: min {d_min} lx / ort {d_avg} lx  "
+                                      f"(U1>={values.get(f'{d_title}_u1')} U2>={values.get(f'{d_title}_u2')})")
+            ev_line = "2. Ev (yon-bazli, asagida):"
+            uv_line = "\n".join(dir_lines)
         else:
-            uv_line = "    Duzgunluk: belirtilmemis"
+            ev_line = f"2. Ev (0/90/180/270 - hepsi ayni):  min {values['Ev_min']} lx / ort {values['Ev_avg']} lx"
+            if values['u1v'] is not None:
+                uv_line = f"    Duzgunluk: U1v >= {values['u1v']}   U2v >= {values['u2v']}"
+            else:
+                uv_line = "    Duzgunluk: belirtilmemis"
 
         maur_line = f"3. Komsu Nokta Duzgunluk Orani (MAUR):  {values['maur']}"
         cct_line = f"4. Renk sicakligi (Tc):  {values['cct']}"
         ra_line = f"5. Renk gosterimi (Ra):  >= {values['ra']}"
+        grid_line = f"6. Referans izgara:  {values['reference_grid']}" if is_training_grade else None
 
-        primary_text = "\n".join([eh_line, uh_line, ev_line, uv_line, maur_line, cct_line, ra_line])
+        line_list = [eh_line, uh_line, ev_line, uv_line, maur_line, cct_line, ra_line]
+        if grid_line:
+            line_list.append(grid_line)
+        primary_text = "\n".join(line_list)
 
         self.primary = Label(text=primary_text, font_size=sp(11.5), color=TEXT_MUTED,
                               halign="left", valign="top",
@@ -1534,7 +1602,7 @@ class LevelCard(BoxLayout):
         self.add_widget(self.primary)
 
         # --- Daha az sik kullanilan alanlar: dokununca acilir/kapanir ---
-        mcm_line = f"Mac Sureklilik Modu (MCM):  {values['mcm']}"
+        mcm_line = f"Mac Sureklilik Modu (MCM):  {values.get('mcm', 'belirtilmemis')}"
         ff_line = f"Titresim Faktoru (FF):  {values['ff']}"
         rg_line = f"Kamasma orani (RG):  {values['rg']}"
         mf_line = f"Bakim faktoru (MF):  {values['mf']}"
@@ -1751,9 +1819,12 @@ class StandardsScreen(Screen):
                    "olarak degistirilecek.\n\nIzgara otomatik olarak 17 x 11 "
                    "yapilacak ve mevcut olcumler sifirlanacak.\n\nEmin misiniz?")
         else:
+            level_values = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
+            auto_rows, auto_cols = level_values.get("auto_grid", (12, 8))
+            grid_desc = level_values.get("reference_grid", "resmi 96 nokta duzeni")
             msg = (f"Aktif standart\n{standard_label}\n"
-                   "olarak degistirilecek.\n\nIzgara otomatik olarak 12 x 8 "
-                   "(resmi 96 nokta duzeni) yapilacak ve mevcut olcumler "
+                   f"olarak degistirilecek.\n\nIzgara otomatik olarak {auto_rows} x {auto_cols} "
+                   f"({grid_desc}) yapilacak ve mevcut olcumler "
                    "sifirlanacak. Istenirse sonradan Izgara Ayarlari'ndan "
                    "degistirebilirsiniz.\n\nEmin misiniz?")
         msg_lbl = Label(text=msg, font_size=sp(15), color=TEXT, halign="center", valign="middle")
@@ -1781,10 +1852,14 @@ class StandardsScreen(Screen):
                 ms.save_session()
             else:
                 # FIFA/UEFA'ya YENI geciliyor (veya FIBA'dan cikiliyor) - resmi
-                # 96 nokta (8x12) duzeni otomatik ayarlanir, istenirse sonra degistirilir
-                ms.rows_count_val = 12
-                ms.cols_count_val = 8
-                ms.grid_value_label.text = "12 x 8"
+                # 96 nokta (8x12) duzeni otomatik ayarlanir, istenirse sonra degistirilir.
+                # FIFA'nin Grade 1/2/3 ANTRENMAN sahasi seviyelerinde ("auto_grid"
+                # tanimliysa) bunun yerine o seviyenin KENDI resmi izgarasi kullanilir.
+                level_values = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
+                auto_rows, auto_cols = level_values.get("auto_grid", (12, 8))
+                ms.rows_count_val = auto_rows
+                ms.cols_count_val = auto_cols
+                ms.grid_value_label.text = f"{auto_rows} x {auto_cols}"
                 ms._recompute_sequence(start=True)
                 ms.save_session()
             self.active_label.text = standard_label
@@ -2166,7 +2241,7 @@ class ControlScreen(Screen):
                     by_pos[(data["r"], data["c"])] = ms.ec_values[idx]
         else:
             for data in ms.measurements.values():
-                if data["values"] is not None:
+                if data["values"] is not None and data["values"].get(self.current_dataset) is not None:
                     by_pos[(data["r"], data["c"])] = data["values"][self.current_dataset]
 
         if not by_pos:
@@ -2517,22 +2592,6 @@ class ControlScreen(Screen):
         self.content_area.add_widget(legend_card)
 
         # --- Ozet paneli (Relux/DIALux hesap sayfasi mantiginda) ---
-        values = list(by_pos.values())
-        eavg = sum(values) / len(values)
-        emin = min(values)
-        emax = max(values)
-        uo = emin / eavg if eavg else 0
-        ud = emin / emax if emax else 0
-        uo_ratio = (eavg / emin) if emin else 0
-        ud_ratio = (emax / emin) if emin else 0
-
-        summary_card = Card(bg_color=CARD, radius=14, orientation="vertical",
-                             size_hint_y=None, padding=[dp(16), dp(12), dp(16), dp(12)],
-                             spacing=dp(6))
-        summary_card.add_widget(Label(text="Ozet", font_size=sp(16), bold=True, color=TEXT,
-                                       size_hint_y=None, height=dp(24), halign="left",
-                                       text_size=(dp(300), None)))
-
         def summary_row(label, symbol, value_text):
             row = BoxLayout(size_hint_y=None, height=dp(24))
             row.add_widget(Label(text=label, font_size=sp(13), color=TEXT_MUTED,
@@ -2543,16 +2602,49 @@ class ControlScreen(Screen):
                                   halign="right", text_size=(dp(90), None), size_hint_x=0.35))
             return row
 
-        summary_card.add_widget(summary_row("Ortalama aydinlatma", "E\u0304m", f"{eavg:.0f} lx"))
-        summary_card.add_widget(summary_row("Minimum aydinlatma", "Emin", f"{emin:.0f} lx"))
-        summary_card.add_widget(summary_row("Maksimum aydinlatma", "Emax", f"{emax:.0f} lx"))
-        summary_card.add_widget(summary_row("Duzgunluk Uo", "Emin/E\u0304m",
-                                             f"1:{uo_ratio:.2f} ({uo:.2f})"))
-        summary_card.add_widget(summary_row("Cesitlilik Ud", "Emin/Emax",
-                                             f"1:{ud_ratio:.2f} ({ud:.2f})"))
+        def build_summary_card(title, pos_values):
+            vals = list(pos_values)
+            if not vals:
+                return None
+            avg = sum(vals) / len(vals)
+            vmn = min(vals)
+            vmx = max(vals)
+            uo = vmn / avg if avg else 0
+            ud = vmn / vmx if vmx else 0
+            uo_ratio = (avg / vmn) if vmn else 0
+            ud_ratio = (vmx / vmn) if vmn else 0
+            card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                        size_hint_y=None, padding=[dp(16), dp(12), dp(16), dp(12)],
+                        spacing=dp(6))
+            card.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT,
+                                   size_hint_y=None, height=dp(24), halign="left",
+                                   text_size=(dp(300), None)))
+            card.add_widget(summary_row("Ortalama aydinlatma", "E\u0304m", f"{avg:.0f} lx"))
+            card.add_widget(summary_row("Minimum aydinlatma", "Emin", f"{vmn:.0f} lx"))
+            card.add_widget(summary_row("Maksimum aydinlatma", "Emax", f"{vmx:.0f} lx"))
+            card.add_widget(summary_row("Duzgunluk Uo", "Emin/E\u0304m",
+                                         f"1:{uo_ratio:.2f} ({uo:.2f})"))
+            card.add_widget(summary_row("Cesitlilik Ud", "Emin/Emax",
+                                         f"1:{ud_ratio:.2f} ({ud:.2f})"))
+            card.bind(minimum_height=card.setter("height"))
+            return card
 
-        summary_card.bind(minimum_height=summary_card.setter("height"))
-        self.content_area.add_widget(summary_card)
+        if ms.org == "FIBA":
+            margin = ms.fiba_ppa_margin
+            ppa_vals = [v for (r, c), v in by_pos.items()
+                        if margin <= r < satir_n - margin and margin <= c < sutun_n - margin]
+            tpa_vals = list(by_pos.values())
+            ppa_card = build_summary_card("Ozet - PPA (Ana Oyun Alani)", ppa_vals)
+            if ppa_card:
+                self.content_area.add_widget(ppa_card)
+            tpa_card = build_summary_card("Ozet - TPA (Toplam Oyun Alani)", tpa_vals)
+            if tpa_card:
+                self.content_area.add_widget(tpa_card)
+            return
+
+        summary_card = build_summary_card("Ozet", list(by_pos.values()))
+        if summary_card:
+            self.content_area.add_widget(summary_card)
 
 
 class ReportScreen(Screen):
@@ -3050,7 +3142,7 @@ class ReportScreen(Screen):
                 zone = data["zones"].get(zone_name)
                 if zone is None:
                     continue
-                if pdf.get_y() > 240:
+                if pdf.get_y() > 220:
                     pdf.add_page()
                 pdf.set_font(BASE_FONT, "B", 12)
                 pdf.set_fill_color(*BRAND_TINT)
@@ -3060,48 +3152,88 @@ class ReportScreen(Screen):
                                f"{'UYGUN' if zone_ok else 'UYGUN DEGIL'}", border=1, fill=True, ln=True)
                 pdf.set_text_color(0, 0, 0)
 
-                col_w = [70, 35, 35, 40]
+                col_w = [68, 32, 32, 40]
                 pdf.set_font(BASE_FONT, "B", 9)
                 pdf.set_fill_color(240, 240, 244)
-                for w, h in zip(col_w, ["Metrik", "Ortalama", "U1 (min/maks)", "U2 (min/ort)"]):
+                for w, h in zip(col_w, ["Kriter", "Referans", "Olculen", "Sonuc"]):
                     pdf.cell(w, 6, h, border=1, fill=True, align="C")
                 pdf.ln()
                 pdf.set_font(BASE_FONT, "", 9)
 
-                ec = zone["EC"]
-                ec_avg_str = f"{ec['avg']:.0f}" if ec["avg"] is not None else "Olculmedi"
-                pdf.cell(col_w[0], 6, "EC (Kamera)", border=1)
-                pdf.cell(col_w[1], 6, ec_avg_str, border=1, align="C")
-                pdf.set_text_color(*GOOD) if ec["ok"] else pdf.set_text_color(*BAD)
-                pdf.cell(col_w[2], 6, f"{ec['u1']:.2f}" if ec["u1"] is not None else "-", border=1, align="C")
-                pdf.cell(col_w[3], 6, f"{ec['u2']:.2f}" if ec["u2"] is not None else "-", border=1, align="C")
-                pdf.set_text_color(0, 0, 0)
-                pdf.ln()
+                th = FIBA_STANDARDS[zone_name]
 
-                for d_name, d_res in zone["EV"]["per_direction"].items():
-                    pdf.cell(col_w[0], 6, f"EV {d_name}", border=1)
-                    pdf.cell(col_w[1], 6, f"{d_res['avg']:.0f}", border=1, align="C")
-                    pdf.set_text_color(*GOOD) if d_res["ok"] else pdf.set_text_color(*BAD)
-                    pdf.cell(col_w[2], 6, f"{d_res['u1']:.2f}", border=1, align="C")
-                    pdf.cell(col_w[3], 6, f"{d_res['u2']:.2f}", border=1, align="C")
+                def crit_pdf_row(label, ref_str, val_str, ok):
+                    if pdf.get_y() > 275:
+                        pdf.add_page()
+                    pdf.cell(col_w[0], 6, label, border=1)
+                    pdf.cell(col_w[1], 6, ref_str, border=1, align="C")
+                    pdf.cell(col_w[2], 6, val_str, border=1, align="C")
+                    pdf.set_text_color(*GOOD) if ok else pdf.set_text_color(*BAD)
+                    pdf.cell(col_w[3], 6, "UYGUN" if ok else "UYGUN DEGIL", border=1, align="C")
                     pdf.set_text_color(0, 0, 0)
                     pdf.ln()
 
-                pdf.cell(col_w[0], 6, "EV yon dengesi (min/maks)", border=1)
-                pdf.set_text_color(*GOOD) if zone["EV"]["dir_ratio_ok"] else pdf.set_text_color(*BAD)
-                pdf.cell(col_w[1] + col_w[2] + col_w[3], 6, f"{zone['EV']['dir_ratio']:.2f}",
-                         border=1, align="C")
-                pdf.set_text_color(0, 0, 0)
-                pdf.ln()
+                ec = zone["EC"]
+                if ec["avg"] is not None:
+                    crit_pdf_row("EC Ortalama >", f"{th['ec_avg']}", f"{ec['avg']:.0f}",
+                                 ec["avg"] >= th["ec_avg"])
+                    crit_pdf_row("EC Duzgunluk U1 >=", f"{th['ec_u1']:.2f}", f"{ec['u1']:.2f}",
+                                 ec["u1"] >= th["ec_u1"])
+                    crit_pdf_row("EC Duzgunluk U2 >=", f"{th['ec_u2']:.2f}", f"{ec['u2']:.2f}",
+                                 ec["u2"] >= th["ec_u2"])
+                else:
+                    crit_pdf_row("EC", f">={th['ec_avg']}", f"Olculmedi (0/{ec['total_count']})", False)
+
+                for d_name, d_res in zone["EV"]["per_direction"].items():
+                    crit_pdf_row(f"EV {d_name} Ortalama >", f"{th['ev_avg']}", f"{d_res['avg']:.0f}",
+                                 d_res["avg"] >= th["ev_avg"])
+                    crit_pdf_row(f"EV {d_name} Duzgunluk U1 >=", f"{th['ev_u1']:.2f}",
+                                 f"{d_res['u1']:.2f}", d_res["u1"] >= th["ev_u1"])
+                    crit_pdf_row(f"EV {d_name} Duzgunluk U2 >=", f"{th['ev_u2']:.2f}",
+                                 f"{d_res['u2']:.2f}", d_res["u2"] >= th["ev_u2"])
+                crit_pdf_row("EV Yon Dengesi (min/maks) >=", f"{th['ev_dir_ratio']:.2f}",
+                             f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"])
 
                 eh = zone["EH"]
-                pdf.cell(col_w[0], 6, "EH (Yatay, 1500-3000 araligi)", border=1)
-                pdf.cell(col_w[1], 6, f"{eh['avg']:.0f}", border=1, align="C")
-                pdf.set_text_color(*GOOD) if eh["ok"] else pdf.set_text_color(*BAD)
-                pdf.cell(col_w[2], 6, f"{eh['u1']:.2f}", border=1, align="C")
-                pdf.cell(col_w[3], 6, f"{eh['u2']:.2f}", border=1, align="C")
-                pdf.set_text_color(0, 0, 0)
-                pdf.ln(9)
+                if eh["avg"] is not None:
+                    crit_pdf_row("EH Ortalama (aralik)", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                                 f"{eh['avg']:.0f}", eh["avg_ok"])
+                    crit_pdf_row("EH Duzgunluk U1 >=", f"{th['eh_u1']:.2f}", f"{eh['u1']:.2f}",
+                                 eh["u1"] >= th["eh_u1"])
+                    crit_pdf_row("EH Duzgunluk U2 >=", f"{th['eh_u2']:.2f}", f"{eh['u2']:.2f}",
+                                 eh["u2"] >= th["eh_u2"])
+                else:
+                    crit_pdf_row("EH", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                                 f"Olculmedi (0/{eh['total_count']})", False)
+                pdf.ln(6)
+
+            # ============================================================
+            # ISIK KAYNAGI (Tablo 6): Flicker / CRI / Renk Sicakligi
+            # ============================================================
+            fifa = data["fifa_info"]
+            if pdf.get_y() > 250:
+                pdf.add_page()
+            pdf.set_font(BASE_FONT, "B", 12)
+            pdf.set_fill_color(*BRAND_TINT)
+            pdf.set_text_color(*BRAND)
+            pdf.cell(0, 8, "Isik Kaynagi (Tablo 6)", border=1, fill=True, ln=True)
+            pdf.set_text_color(0, 0, 0)
+            col_w_ls = [68, 32, 32, 40]
+            pdf.set_font(BASE_FONT, "B", 9)
+            pdf.set_fill_color(240, 240, 244)
+            for w, h in zip(col_w_ls, ["Kriter", "Referans", "Girilen Deger", ""]):
+                pdf.cell(w, 6, h, border=1, fill=True, align="C")
+            pdf.ln()
+            pdf.set_font(BASE_FONT, "", 9)
+            for label, ref, key in [("Flicker Faktoru", "<=%1", "flicker_avg"),
+                                     ("Renk Gosterimi (CRI)", ">=80", "colour_rendering_ra"),
+                                     ("Renk Sicakligi", "4000-6000K", "colour_temp_tc")]:
+                pdf.cell(col_w_ls[0], 6, label, border=1)
+                pdf.cell(col_w_ls[1], 6, ref, border=1, align="C")
+                pdf.cell(col_w_ls[2], 6, fifa.get(key) or "-", border=1, align="C")
+                pdf.cell(col_w_ls[3], 6, "", border=1)
+                pdf.ln()
+            pdf.ln(4)
 
             # ============================================================
             # HAM OLCUM VERILERI (EC dahil)
@@ -3191,7 +3323,25 @@ class ReportScreen(Screen):
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_draw_color(0, 0, 0)
 
-                legend_y = start_y + cols_n * cell_h + 6
+                # --- PPA sinirini kalin mavi cerceveyle goster (uygulamadaki ile ayni) ---
+                margin = data["ppa_margin"]
+                ppa_x0 = start_x + margin * cell_w
+                ppa_y0 = start_y + margin * cell_h
+                ppa_w = rows_n * cell_w - 2 * margin * cell_w
+                ppa_h = cols_n * cell_h - 2 * margin * cell_h
+                if ppa_w > 0 and ppa_h > 0:
+                    pdf.set_draw_color(*BRAND)
+                    pdf.set_line_width(0.9)
+                    pdf.rect(ppa_x0, ppa_y0, ppa_w, ppa_h, style="D")
+                    pdf.set_draw_color(0, 0, 0)
+                    pdf.set_line_width(0.2)
+                pdf.set_font(BASE_FONT, "I", 8)
+                pdf.set_text_color(*MUTED)
+                pdf.set_xy(start_x, start_y + cols_n * cell_h + 1)
+                pdf.cell(0, 4, "Mavi cerceve = PPA siniri (disi = TPA)", align="L")
+                pdf.set_text_color(0, 0, 0)
+
+                legend_y = start_y + cols_n * cell_h + 11
                 legend_w = min(avail_w, rows_n * cell_w)
                 steps = 50
                 seg_w = legend_w / steps
@@ -3213,6 +3363,46 @@ class ReportScreen(Screen):
                     align = "L" if i == 0 else ("R" if i == 4 else "C")
                     pdf.cell(20, 5, f"{val_tick:.0f}", align=align)
                 pdf.set_text_color(0, 0, 0)
+
+                # --- PPA / TPA icin ayri ayri Ortalama/Min/Maks/Duzgunluk ozeti ---
+                def stats_for(zone_name, dataset_title):
+                    zone = data["zones"].get(zone_name)
+                    if zone is None:
+                        return None
+                    if dataset_title == "Eh":
+                        s = zone["EH"]
+                    elif dataset_title == "EC":
+                        s = zone["EC"]
+                    else:
+                        s = zone["EV"]["per_direction"].get(dataset_title)
+                    if s is None or s.get("avg") is None:
+                        return None
+                    return s
+
+                table_y = legend_y + 14
+                pdf.set_xy(start_x, table_y)
+                col_w_s = [22, 32, 26, 26, 26, 26]
+                pdf.set_font(BASE_FONT, "B", 9)
+                pdf.set_fill_color(*BRAND_TINT)
+                for w, h in zip(col_w_s, ["Bolge", "Ortalama", "Minimum", "Maksimum", "U1", "U2"]):
+                    pdf.cell(w, 7, h, border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_font(BASE_FONT, "", 9)
+                for zone_name, zone_label in [("PPA", "PPA"), ("TPA", "TPA")]:
+                    pdf.set_x(start_x)
+                    s = stats_for(zone_name, title)
+                    pdf.set_font(BASE_FONT, "B", 9)
+                    pdf.cell(col_w_s[0], 7, zone_label, border=1, align="C")
+                    pdf.set_font(BASE_FONT, "", 9)
+                    if s is None:
+                        pdf.cell(sum(col_w_s[1:]), 7, "Olculmedi", border=1, align="C")
+                    else:
+                        pdf.cell(col_w_s[1], 7, f"{s['avg']:.0f}", border=1, align="C")
+                        pdf.cell(col_w_s[2], 7, f"{s['min']:.0f}", border=1, align="C")
+                        pdf.cell(col_w_s[3], 7, f"{s['max']:.0f}", border=1, align="C")
+                        pdf.cell(col_w_s[4], 7, f"{s['u1']:.2f}", border=1, align="C")
+                        pdf.cell(col_w_s[5], 7, f"{s['u2']:.2f}", border=1, align="C")
+                    pdf.ln()
 
             fname = f"aydinlatma_raporu_FIBA_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
@@ -4139,41 +4329,97 @@ class ReportScreen(Screen):
                 font_size=sp(14), bold=True, color=GREEN_TXT if zone_ok else RED_TXT,
                 size_hint_y=None, height=dp(22), halign="left", text_size=(dp(300), None)))
 
-            def metric_row(label, val_str, ok):
-                row = BoxLayout(size_hint_y=None, height=dp(22))
-                row.add_widget(Label(text=label, font_size=sp(12), color=TEXT_MUTED,
-                                      halign="left", size_hint_x=0.6))
-                row.add_widget(Label(text=val_str, font_size=sp(12), bold=True,
-                                      color=GREEN_TXT if ok else RED_TXT, halign="right"))
+            def crit_header():
+                row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(2))
+                for w, h in zip([0.34, 0.24, 0.24, 0.18],
+                                 ["Kriter", "Referans", "Olculen", "Sonuc"]):
+                    row.add_widget(Label(text=h, font_size=sp(10.5), bold=True, color=TEXT_MUTED,
+                                          size_hint_x=w, halign="left" if h == "Kriter" else "center",
+                                          valign="middle"))
                 return row
+
+            def crit_row(label, ref_str, val_str, ok):
+                row = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
+                row.add_widget(Label(text=label, font_size=sp(10.5), color=TEXT,
+                                      size_hint_x=0.34, halign="left", valign="middle",
+                                      shorten=True))
+                row.add_widget(Label(text=ref_str, font_size=sp(10.5), color=TEXT_MUTED,
+                                      size_hint_x=0.24, halign="center", valign="middle"))
+                row.add_widget(Label(text=val_str, font_size=sp(10.5), bold=True, color=TEXT,
+                                      size_hint_x=0.24, halign="center", valign="middle"))
+                row.add_widget(Label(text="UYGUN" if ok else "UYGUN DEGIL", font_size=sp(9.5),
+                                      bold=True, color=GREEN_TXT if ok else RED_TXT,
+                                      size_hint_x=0.18, halign="center", valign="middle"))
+                for lbl in row.children:
+                    lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+                return row
+
+            th = FIBA_STANDARDS[zone_name]
+            zone_card.add_widget(crit_header())
 
             ec = zone["EC"]
             if ec["avg"] is not None:
-                ec_val_str = f"{ec['avg']:.0f} / {ec['u1']:.2f} / {ec['u2']:.2f}"
+                zone_card.add_widget(crit_row("EC Ortalama >", f"{th['ec_avg']}", f"{ec['avg']:.0f}",
+                                               ec["avg"] >= th["ec_avg"]))
+                zone_card.add_widget(crit_row("EC Duz. U1 >=", f"{th['ec_u1']:.2f}",
+                                               f"{ec['u1']:.2f}", ec["u1"] >= th["ec_u1"]))
+                zone_card.add_widget(crit_row("EC Duz. U2 >=", f"{th['ec_u2']:.2f}",
+                                               f"{ec['u2']:.2f}", ec["u2"] >= th["ec_u2"]))
             else:
-                ec_val_str = f"Olculmedi (0/{ec['total_count']})"
-            zone_card.add_widget(metric_row("EC ort/U1/U2", ec_val_str, ec["ok"]))
-            if ec["avg"] is not None and ec["measured_count"] < ec["total_count"]:
-                zone_card.add_widget(Label(
-                    text=f"(EC: {ec['measured_count']}/{ec['total_count']} nokta olculdu)",
-                    font_size=sp(10.5), color=TEXT_MUTED, size_hint_y=None, height=dp(16),
-                    halign="left"))
+                zone_card.add_widget(crit_row("EC", f">={th['ec_avg']}",
+                                               f"Olculmedi (0/{ec['total_count']})", False))
 
             for d_name, d_res in zone["EV"]["per_direction"].items():
-                zone_card.add_widget(metric_row(
-                    f"EV {d_name} ort/U1/U2",
-                    f"{d_res['avg']:.0f} / {d_res['u1']:.2f} / {d_res['u2']:.2f}", d_res["ok"]))
-            zone_card.add_widget(metric_row(
-                "EV yon dengesi (min/maks)",
-                f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"]))
+                zone_card.add_widget(crit_row(f"EV {d_name} Ortalama >", f"{th['ev_avg']}",
+                                               f"{d_res['avg']:.0f}", d_res["avg"] >= th["ev_avg"]))
+                zone_card.add_widget(crit_row(f"EV {d_name} Duz. U1 >=", f"{th['ev_u1']:.2f}",
+                                               f"{d_res['u1']:.2f}", d_res["u1"] >= th["ev_u1"]))
+                zone_card.add_widget(crit_row(f"EV {d_name} Duz. U2 >=", f"{th['ev_u2']:.2f}",
+                                               f"{d_res['u2']:.2f}", d_res["u2"] >= th["ev_u2"]))
+            zone_card.add_widget(crit_row("EV Yon Dengesi >=", f"{th['ev_dir_ratio']:.2f}",
+                                           f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"]))
 
             eh = zone["EH"]
-            zone_card.add_widget(metric_row(
-                "EH ort (1500-3000 araligi) /U1/U2",
-                f"{eh['avg']:.0f} / {eh['u1']:.2f} / {eh['u2']:.2f}", eh["ok"]))
+            if eh["avg"] is not None:
+                zone_card.add_widget(crit_row("EH Ortalama (aralik)",
+                                               f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                                               f"{eh['avg']:.0f}", eh["avg_ok"]))
+                zone_card.add_widget(crit_row("EH Duz. U1 >=", f"{th['eh_u1']:.2f}",
+                                               f"{eh['u1']:.2f}", eh["u1"] >= th["eh_u1"]))
+                zone_card.add_widget(crit_row("EH Duz. U2 >=", f"{th['eh_u2']:.2f}",
+                                               f"{eh['u2']:.2f}", eh["u2"] >= th["eh_u2"]))
+            else:
+                zone_card.add_widget(crit_row("EH", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                                               f"Olculmedi (0/{eh['total_count']})", False))
 
             zone_card.bind(minimum_height=zone_card.setter("height"))
             self.content_area.add_widget(zone_card)
+
+        # --- Isik Kaynagi (Tablo 6): Flicker/CRI/Renk Sicakligi - TPA'nin her noktasi
+        #     icin gecerli, elle girilen bilgiler (Ek Rapor Bilgilerini Duzenle'den) ---
+        fifa = data["fifa_info"]
+        ls_card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                        padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(4),
+                        size_hint_y=None)
+        ls_card.add_widget(Label(text="Isik Kaynagi (Tablo 6)", font_size=sp(14), bold=True,
+                                  color=TEXT, size_hint_y=None, height=dp(22),
+                                  halign="left", text_size=(dp(300), None)))
+
+        def ls_row(label, ref_str, val_str):
+            row = BoxLayout(size_hint_y=None, height=dp(20))
+            row.add_widget(Label(text=label, font_size=sp(11.5), color=TEXT_MUTED,
+                                  halign="left", text_size=(dp(140), None), size_hint_x=0.45))
+            row.add_widget(Label(text=ref_str, font_size=sp(11), color=TEXT_MUTED,
+                                  halign="center", text_size=(dp(100), None), size_hint_x=0.3))
+            row.add_widget(Label(text=val_str, font_size=sp(11.5), bold=True, color=TEXT,
+                                  halign="right", text_size=(dp(80), None), size_hint_x=0.25))
+            return row
+
+        ls_card.add_widget(ls_row("Flicker Faktoru", "<=%1", fifa.get("flicker_avg") or "-"))
+        ls_card.add_widget(ls_row("Renk Gosterimi (CRI)", ">=80", fifa.get("colour_rendering_ra") or "-"))
+        ls_card.add_widget(ls_row("Renk Sicakligi", "4000-6000K", fifa.get("colour_temp_tc") or "-"))
+        ls_card.bind(minimum_height=ls_card.setter("height"))
+        self.content_area.add_widget(ls_card)
 
     def _compute_report_data(self):
         """Rapor icin tum hesaplamalari yapar - hem ekran hem PDF/Excel disa aktarimi bunu kullanir."""
@@ -4200,10 +4446,22 @@ class ReportScreen(Screen):
             u2 = (vmin / avg) if avg else 0
             fifa_metrics[title] = {"min": vmin, "max": vmax, "avg": avg, "u1": u1, "u2": u2}
 
-            req_avg = thresholds[f"{kind}_avg"]
-            req_min = thresholds.get(f"{kind}_min")
-            req_u1 = thresholds["u1h"] if kind == "Eh" else thresholds.get("u1v")
-            req_u2 = thresholds["u2h"] if kind == "Eh" else thresholds.get("u2v")
+            # Bazi FIFA egitim sahasi standartlarinda (Grade 2/3) Ev0/Ev180 icin
+            # HICBIR gereksinim yok - yon-bazli bir esik varsa onu, yoksa PROBE
+            # TURUNE (Eh/Ev) gore ortak esigi kullan. Hicbiri yoksa bu yonu ATLA
+            # (yine de fifa_metrics'te ham deger olarak gorunur, sadece kriter
+            # tablosuna eklenmez ve genel sonucu etkilemez).
+            req_avg = thresholds.get(f"{title}_avg", thresholds.get(f"{kind}_avg"))
+            if req_avg is None:
+                plane_groups.append((PLANE_LABELS[title],
+                                      [("Bu yon icin gereksinim yok", "-", f"{avg:.0f}", True)]))
+                continue
+
+            req_min = thresholds.get(f"{title}_min", thresholds.get(f"{kind}_min"))
+            req_u1 = thresholds.get(f"{title}_u1",
+                                     thresholds["u1h"] if kind == "Eh" else thresholds.get("u1v"))
+            req_u2 = thresholds.get(f"{title}_u2",
+                                     thresholds["u2h"] if kind == "Eh" else thresholds.get("u2v"))
 
             criteria = []
             avg_ok = avg >= req_avg
@@ -4343,15 +4601,22 @@ class ReportScreen(Screen):
                                 "dir_ratio_ok": dir_ratio_ok, "ok": ev_all_ok}
 
             # --- EH: ortalama bir ARALIK icinde olmali (tek bir minimum degil) ---
-            eh_vals = [d["values"]["Eh"] for d in pts.values()]
-            eh_avg = sum(eh_vals) / len(eh_vals)
-            eh_min, eh_max = min(eh_vals), max(eh_vals)
-            eh_u1 = (eh_min / eh_max) if eh_max else 0
-            eh_u2 = (eh_min / eh_avg) if eh_avg else 0
-            eh_avg_ok = th["eh_avg_min"] <= eh_avg <= th["eh_avg_max"]
-            eh_ok = eh_avg_ok and eh_u1 >= th["eh_u1"] and eh_u2 >= th["eh_u2"]
+            eh_vals = [d["values"]["Eh"] for d in pts.values() if d["values"].get("Eh") is not None]
+            eh_measured_count = len(eh_vals)
+            if eh_vals:
+                eh_avg = sum(eh_vals) / len(eh_vals)
+                eh_min, eh_max = min(eh_vals), max(eh_vals)
+                eh_u1 = (eh_min / eh_max) if eh_max else 0
+                eh_u2 = (eh_min / eh_avg) if eh_avg else 0
+                eh_avg_ok = th["eh_avg_min"] <= eh_avg <= th["eh_avg_max"]
+                eh_ok = eh_avg_ok and eh_u1 >= th["eh_u1"] and eh_u2 >= th["eh_u2"]
+            else:
+                eh_avg = eh_min = eh_max = eh_u1 = eh_u2 = None
+                eh_avg_ok = False
+                eh_ok = False
             zone_data["EH"] = {"avg": eh_avg, "min": eh_min, "max": eh_max,
-                                "u1": eh_u1, "u2": eh_u2, "avg_ok": eh_avg_ok, "ok": eh_ok}
+                                "u1": eh_u1, "u2": eh_u2, "avg_ok": eh_avg_ok, "ok": eh_ok,
+                                "measured_count": eh_measured_count, "total_count": len(pts)}
 
             zone_ok = ec_ok and ev_all_ok and eh_ok
             zone_data["zone_ok"] = zone_ok
