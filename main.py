@@ -15,6 +15,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
@@ -74,7 +75,7 @@ LIGHT_PALETTE = {
     "ROW_A": (0.97, 0.97, 0.99, 1), "ROW_B": (0.93, 0.93, 0.96, 1),
     "HEADER_BG": (0.86, 0.86, 0.90, 1), "DANGER_TINT": (0.96, 0.87, 0.87, 1),
 }
-CURRENT_THEME = "dark"
+CURRENT_THEME = "light"
 NAV_BG = DARK_PALETTE["NAV_BG"]
 
 
@@ -91,17 +92,17 @@ def apply_palette(name):
 
 def load_saved_theme():
     """Uygulama acilirken, widget'lar insa edilmeden ONCE hangi temanin
-    kayitli oldugunu okur (dosya yoksa/bozuksa varsayilan: gece modu)."""
+    kayitli oldugunu okur (dosya yoksa/bozuksa varsayilan: gunduz modu)."""
     try:
         app = App.get_running_app()
         path = os.path.join(app.user_data_dir, "aydinlatma_session.json")
         if not os.path.exists(path):
-            return "dark"
+            return "light"
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("theme", "dark")
+        return data.get("theme", "light")
     except Exception:
-        return "dark"
+        return "light"
 
 
 ROW_A = DARK_PALETTE["ROW_A"]
@@ -2082,32 +2083,6 @@ class HeatCell(BoxLayout):
         self.rect.size = self.size
 
 
-class GestureAwareScatter(Scatter):
-    """Kivy'nin Scatter'i - ama parmaklarin TAMAMEN kalktigi ani net olarak
-    bilir ve bunu bildirir. Onceki tasarim, parmak hala ekrandayken bir
-    zaman-asimi (debounce) ile isi haritasini YENIDEN INSA ediyordu - bu,
-    Kivy'nin dokunma takibini bozup 'garip, orantisiz kucculme' hissi
-    yaratiyordu (widget jestin ORTASINDA yok edilip yeniden olusturuluyordu).
-    Simdi yeniden insa SADECE gercekten butun parmaklar kalktiginda olur."""
-    def __init__(self, on_gesture_end=None, **kwargs):
-        super().__init__(**kwargs)
-        self.on_gesture_end = on_gesture_end
-        self._active_touch_ids = set()
-
-    def on_touch_down(self, touch):
-        result = super().on_touch_down(touch)
-        if result:
-            self._active_touch_ids.add(touch.uid)
-        return result
-
-    def on_touch_up(self, touch):
-        result = super().on_touch_up(touch)
-        if touch.uid in self._active_touch_ids:
-            self._active_touch_ids.discard(touch.uid)
-            if not self._active_touch_ids and self.on_gesture_end:
-                self.on_gesture_end()
-        return result
-
 
 class ControlScreen(Screen):
     """Kontrol Paneli - DIALux/Relux tarzi pseudo-color isi haritasi."""
@@ -2166,9 +2141,11 @@ class ControlScreen(Screen):
         zoom_row.add_widget(zoom_out_btn)
         zoom_row.add_widget(self.zoom_label)
         zoom_row.add_widget(zoom_in_btn)
-        # NOT: zoom cubugu ARTIK EKRANDA GOSTERILMIYOR - parmakla (pinch) zoom
-        # yeterli hale geldigi icin kaldirildi. self.zoom_label internal takip
-        # icin hala var (goze gorunmez), diger kodlar bozulmasin diye.
+        # Parmakla (pinch) yakinlastirma KALDIRILDI (gercek cihazda ciddi
+        # goruntu bozulmalarina yol acti ve bu ortamda guvenle
+        # duzeltilemedi) - +/- butonlari artik TEK ve GUVENILIR
+        # yakinlastirma yontemi, bu yuzden ekranda GORUNUR olmali.
+        self.root_box.add_widget(zoom_row)
 
         # --- Icerik alani (her sekmeye girildiginde yeniden kurulur) ---
         self.content_area = BoxLayout(orientation="vertical", spacing=dp(10),
@@ -2190,28 +2167,6 @@ class ControlScreen(Screen):
         self.zoom = max(0.5, min(2.6, round(self.zoom + delta, 2)))
         self.zoom_label.text = f"{int(self.zoom * 100)}%"
         self._build_heatmap()
-
-    def _on_scatter_scale(self, scatter, value):
-        """Scatter (Kivy'nin resmi pinch/zoom widget'i) her olcek degisiminde
-        bunu cagirir. SADECE anlik geri bildirim (etiket + bir sonraki
-        deger) burada guncellenir - agir yeniden-cizim ASLA burada
-        tetiklenmez (jestin ortasinda tetiklenirse dokunma takibi bozuluyordu).
-        Gercek yeniden-cizim sadece _on_pinch_gesture_end'de olur."""
-        if value == 1.0:
-            return
-        new_zoom = max(0.5, min(2.6, round(self.zoom * value, 2)))
-        self.zoom_label.text = f"{int(new_zoom * 100)}%"
-        self._pending_zoom = new_zoom
-
-    def _on_pinch_gesture_end(self):
-        """Butun parmaklar GERCEKTEN kalktiginda cagrilir - tek ve net
-        bir yeniden-cizim burada yapilir."""
-        new_zoom = getattr(self, "_pending_zoom", None)
-        if new_zoom is None or new_zoom == self.zoom:
-            return
-        self.zoom = new_zoom
-        self._pending_zoom = None
-        self._build_heatmap()  # yeni zoom ile KESKIN/net yeniden ciz
 
     def toggle_maur(self):
         self.maur_mode = not self.maur_mode
@@ -2261,7 +2216,6 @@ class ControlScreen(Screen):
     def on_leave(self, *a):
         if getattr(self, "_active_cell", None):
             self._active_cell.stop()
-        self._pending_zoom = None
 
     def _build_heatmap(self):
         if getattr(self, "_active_cell", None):
@@ -2483,24 +2437,20 @@ class ControlScreen(Screen):
                 tag.pos = pos
                 heat_container.add_widget(tag)
 
-        # --- Parmakla zoom (pinch): Kivy'nin Scatter'i - ama SADECE olcekleme
-        #     icin (cevirme/donme kapali) - tek parmak kaydirma ScrollView'e
-        #     dokunulmadan normal calismaya devam eder. Agir yeniden-cizim
-        #     islemi SADECE jest gercekten bittiginde (butun parmaklar
-        #     kalktiginda) yapilir - jestin ortasinda ASLA. ---
-        pinch_scatter = GestureAwareScatter(
-            on_gesture_end=self._on_pinch_gesture_end,
-            do_rotation=False, do_translation=False, do_scale=True,
-            scale_min=0.5 / max(self.zoom, 0.01),
-            scale_max=2.6 / max(self.zoom, 0.01),
-            size=(display_w, display_h), size_hint=(None, None))
-        pinch_scatter.add_widget(heat_container)
-        pinch_scatter.bind(scale=self._on_scatter_scale)
-        self._active_scatter = pinch_scatter
+        # --- Yakinlastirma SADECE asagidaki +/- butonlariyla yapilir.
+        #     Parmakla pinch-zoom (Kivy'nin Scatter widget'i) KALDIRILDI:
+        #     gercek cihazda tekrar eden ciddi goruntu bozulmalarina
+        #     (kaymalar, eski haline donmeme) yol acti ve bu ortamda gercek
+        #     coklu-dokunus jestleriyle test edilemedigi icin guvenle
+        #     duzeltilemedi. +/- butonlari ayni zoom mekanizmasini kullanir
+        #     ve tam test edilmis, guvenilir sekilde calisir. ---
+        heat_wrapper = BoxLayout(size=(display_w, display_h), size_hint=(None, None))
+        heat_wrapper.add_widget(heat_container)
+        self._active_scatter = None
 
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
                              bar_width=dp(6))
-        scroll.add_widget(pinch_scatter)
+        scroll.add_widget(heat_wrapper)
         self._heatmap_scroll = scroll
         self._last_display_size = (display_w, display_h)
 
@@ -2906,6 +2856,15 @@ class ReportScreen(Screen):
             fc = Card(bg_color=CARD_LIGHT, radius=8, size_hint_y=None, height=dp(40))
             ti = ThemedTextInput(text=ms.fifa_info.get(key, ""), multiline=False, font_size=sp(13))
             inputs[key] = ti
+
+            def on_focus(instance, is_focused, fc=fc):
+                if is_focused:
+                    self._focused_popup_field = fc
+                    # klavye zaten aciksa (baska bir alandan gecildiyse) hemen kaydir;
+                    # degilse asagidaki on_keyboard_height olayi acilinca kaydiracak
+                    Clock.schedule_once(lambda dt: scroll.scroll_to(fc, padding=dp(24)), 0.05)
+
+            ti.bind(focus=on_focus)
             fc.add_widget(ti)
             form.add_widget(fc)
 
@@ -2962,6 +2921,24 @@ class ReportScreen(Screen):
         popup = Popup(title="", content=content, size_hint=(0.92, 0.85),
                        auto_dismiss=False, background_color=(0, 0, 0, 0), background='',
                        separator_height=0, title_size=0)
+
+        from kivy.core.window import Window as _KbWin
+        self._focused_popup_field = None
+
+        def _on_keyboard_height(instance, height):
+            # Klavye acilma/kapanma ANIMASYONU tam bittiginde bu kesin olarak
+            # tetiklenir (sabit bir sure tahmin etmekten cok daha guvenilir) -
+            # o anda odakli alani tekrar gorunur konuma kaydiralim.
+            field = getattr(self, "_focused_popup_field", None)
+            if field is not None and height > 0:
+                Clock.schedule_once(lambda dt: scroll.scroll_to(field, padding=dp(24)), 0.02)
+
+        _KbWin.bind(on_keyboard_height=_on_keyboard_height)
+
+        def _cleanup_keyboard_binding(*a):
+            _KbWin.unbind(on_keyboard_height=_on_keyboard_height)
+
+        popup.bind(on_dismiss=_cleanup_keyboard_binding)
 
         def do_save(*a):
             for key, ti in inputs.items():
@@ -4961,7 +4938,10 @@ class SettingsScreen(Screen):
             bg_color=ACCENT, font_size=sp(13), bold=True,
             size_hint=(None, None), size=(dp(90), dp(40)))
         self.theme_toggle_btn.bind(on_release=self._on_toggle_theme)
-        theme_row.add_widget(self.theme_toggle_btn)
+        theme_btn_anchor = AnchorLayout(anchor_x="center", anchor_y="center",
+                                         size_hint_x=None, width=dp(90))
+        theme_btn_anchor.add_widget(self.theme_toggle_btn)
+        theme_row.add_widget(theme_btn_anchor)
         theme_card.add_widget(theme_row)
         outer.add_widget(theme_card)
 
@@ -5095,6 +5075,12 @@ class RootLayout(BoxLayout):
 
 class AydinlatmaApp(App):
     def build(self):
+        # Klavye acilinca, o an odaklanilan alanin (TextInput) klavyenin
+        # ARKASINDA KALMAMASI icin Kivy'nin otomatik ayarlamasini ac.
+        # Varsayilan bos ('') modda Kivy hicbir ayarlama yapmaz - klavye
+        # dogrudan icerigin ustune biner ve doldurulan alan gorunmez olurdu.
+        from kivy.core.window import Window as _Win
+        _Win.softinput_mode = "below_target"
         apply_palette(load_saved_theme())
         return RootLayout()
 
