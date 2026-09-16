@@ -780,6 +780,16 @@ class MeasureScreen(Screen):
             "pitch_width": "", "pitch_length": "",
             "flicker_avg": "", "flicker_max": "",
             "colour_temp_tc": "", "colour_rendering_ra": "", "glare_rating_rg": "",
+            # --- Asagidakiler onceden SABIT (koddan degistirilmesi gereken) degerlerdi.
+            # Artik varsayilan olarak ayni degerlerle basliyor ama Rapor > Ek Rapor
+            # Bilgilerini Duzenle'den GUNCELLENEBILIR - ileride adres/telefon/
+            # denetleyen/prob degisirse koda dokunmaya gerek kalmaz.
+            "meter_model": METER_MODEL, "meter_serial": METER_SERIAL,
+            "probe_serial_eh": PROBE_SERIALS["Eh"], "probe_serial_ev0": PROBE_SERIALS["Ev0"],
+            "probe_serial_ev90": PROBE_SERIALS["Ev90"], "probe_serial_ev180": PROBE_SERIALS["Ev180"],
+            "probe_serial_ev270": PROBE_SERIALS["Ev270"],
+            "org_name": ORG_NAME, "org_address": ORG_ADDRESS,
+            "org_phone_email": ORG_PHONE_EMAIL, "inspector_name": INSPECTOR_NAME,
         }
         self.report_language = "tr"  # "tr" veya "en" - PDF raporunun dili
         self.fiba_ppa_margin = 1  # TPA sinirindan PPA'ya kac "halka" ic - varsayilan 1
@@ -1306,6 +1316,14 @@ class MeasureScreen(Screen):
                 "Pi'ye baglanildi ama cihazdan\nveri gelmiyor. T-10MA'nin USB\nbaglantisini kontrol edin.")
             return
 
+        # Olculen degerler virgulden sonraki kismiyla karisik gorunuyordu -
+        # bir sonraki tam sayiya (tavana) yuvarlayarak sade tam sayilar
+        # olarak saklıyoruz. Bu, TEK bir noktada yapiliyor ki tablo, isi
+        # haritasi ve tum hesaplamalar hep AYNI, tutarli degeri gorsun.
+        if data:
+            data = {k: (math.ceil(v) if isinstance(v, (int, float)) else v)
+                     for k, v in data.items()}
+
         if self._fiba_round2_active():
             idx = self.fiba_r2_current_index
             if idx >= len(self.sequence):
@@ -1800,7 +1818,7 @@ class StandardsScreen(Screen):
         card.add_widget(info_lbl)
 
         ec_note = Label(text="EC degeri: Olcum ekraninda, her nokta icin Alici Kafa "
-                              "No.0 (kameraya cevrilerek) ile elle girilir.",
+                              "No.0 kameraya cevrilerek AYRI bir olcum olarak alinir.",
                          font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
                          halign="left", valign="top")
         ec_note.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
@@ -1828,19 +1846,33 @@ class StandardsScreen(Screen):
         _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
         content.add_widget(_popup_title_lbl)
         standard_label = f"{self.browse_org} · {self.preview_level}" if self.preview_level else self.browse_org
-        if self.browse_org == "FIBA":
+
+        ms_ref = self.measure_screen
+        entering_fiba = self.browse_org == "FIBA"
+        leaving_fiba = ms_ref.org == "FIBA" and self.browse_org != "FIBA"
+        has_data = len(ms_ref.measurements) > 0
+
+        if entering_fiba:
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nIzgara otomatik olarak 17 x 11 "
                    "yapilacak ve mevcut olcumler sifirlanacak.\n\nEmin misiniz?")
+        elif leaving_fiba:
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nFIBA'ya ozel EC verisi baska "
+                   "standartlarla uyumlu olmadigindan, mevcut olcumler "
+                   "sifirlanacak.\n\nEmin misiniz?")
+        elif has_data:
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nMevcut olcumleriniz KORUNACAK - "
+                   "izgara ve veriler aynen kalacak, sadece karsilastirilan "
+                   "standart degisecek.\n\nEmin misiniz?")
         else:
             level_values = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
             auto_rows, auto_cols = level_values.get("auto_grid", (12, 8))
             grid_desc = level_values.get("reference_grid", "resmi 96 nokta duzeni")
             msg = (f"Aktif standart\n{standard_label}\n"
                    f"olarak degistirilecek.\n\nIzgara otomatik olarak {auto_rows} x {auto_cols} "
-                   f"({grid_desc}) yapilacak ve mevcut olcumler "
-                   "sifirlanacak. Istenirse sonradan Izgara Ayarlari'ndan "
-                   "degistirebilirsiniz.\n\nEmin misiniz?")
+                   f"({grid_desc}) yapilacak.\n\nEmin misiniz?")
         msg_lbl = Label(text=msg, font_size=sp(15), color=TEXT, halign="center", valign="middle")
         msg_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
         content.add_widget(msg_lbl)
@@ -1857,18 +1889,27 @@ class StandardsScreen(Screen):
             popup.dismiss()
             ms = self.measure_screen
             ms.update_standard_badge(self.browse_org, self.preview_level)
-            if self.browse_org == "FIBA":
+            if entering_fiba:
                 ms.fiba_ppa_margin = 1  # en dis nokta halkasi haric hepsi PPA
                 ms.rows_count_val = 17
                 ms.cols_count_val = 11
                 ms.grid_value_label.text = "17 x 11"
                 ms._recompute_sequence(start=True)
                 ms.save_session()
+            elif leaving_fiba:
+                # FIBA'dan CIKILIYOR: EC sutunu/verisi baska standartlarla
+                # uyumsuz - izgarayi ve olcumleri temizleyerek karisikligi onle
+                ms._recompute_sequence(start=True)
+                ms.save_session()
+            elif has_data:
+                # AYNI AILE icinde (FIFA<->FIFA/UEFA) gecis YAPILIYOR ve
+                # zaten olcum VAR - izgaraya ve olcumlere HIC DOKUNMA, sadece
+                # karsilastirilan esik profilini (org/level) degistir. Boylece
+                # yanlislikla secilen bir standart, alinan olcumleri silmez.
+                ms._rebuild_table_header()
+                ms.save_session()
             else:
-                # FIFA/UEFA'ya YENI geciliyor (veya FIBA'dan cikiliyor) - resmi
-                # 96 nokta (8x12) duzeni otomatik ayarlanir, istenirse sonra degistirilir.
-                # FIFA'nin Grade 1/2/3 ANTRENMAN sahasi seviyelerinde ("auto_grid"
-                # tanimliysa) bunun yerine o seviyenin KENDI resmi izgarasi kullanilir.
+                # veri yok, resmi izgarayi rahatlikla uygulayabiliriz
                 level_values = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
                 auto_rows, auto_cols = level_values.get("auto_grid", (12, 8))
                 ms.rows_count_val = auto_rows
@@ -2888,13 +2929,13 @@ class ReportScreen(Screen):
         field("Model", "lum1_model")
 
         section("OLCUM CIHAZI")
-        readonly_row("Cihaz", METER_MODEL)
-        readonly_row("Seri No", METER_SERIAL)
-        readonly_row("Alici Kafa No.0 Seri No", PROBE_SERIALS["Eh"])
-        readonly_row("Alici Kafa No.1 Seri No", PROBE_SERIALS["Ev0"])
-        readonly_row("Alici Kafa No.2 Seri No", PROBE_SERIALS["Ev90"])
-        readonly_row("Alici Kafa No.3 Seri No", PROBE_SERIALS["Ev180"])
-        readonly_row("Alici Kafa No.4 Seri No", PROBE_SERIALS["Ev270"])
+        field("Cihaz", "meter_model")
+        field("Seri No", "meter_serial")
+        field("Alici Kafa No.0 Seri No", "probe_serial_eh")
+        field("Alici Kafa No.1 Seri No", "probe_serial_ev0")
+        field("Alici Kafa No.2 Seri No", "probe_serial_ev90")
+        field("Alici Kafa No.3 Seri No", "probe_serial_ev180")
+        field("Alici Kafa No.4 Seri No", "probe_serial_ev270")
         field("Kalibrasyon Tarihi", "cal_date")
 
         section("RENK OLCER (varsa)")
@@ -2902,11 +2943,11 @@ class ReportScreen(Screen):
         field("Seri No", "colour_meter_serial")
         field("Kalibrasyon Tarihi", "colour_meter_cal_date")
 
-        section("KURULUS BILGILERI (sabit)")
-        readonly_row("Kurulus", ORG_NAME)
-        readonly_row("Adres", ORG_ADDRESS)
-        readonly_row("Telefon / E-posta", ORG_PHONE_EMAIL)
-        readonly_row("Denetleyen", INSPECTOR_NAME)
+        section("KURULUS BILGILERI")
+        field("Kurulus", "org_name")
+        field("Adres", "org_address")
+        field("Telefon / E-posta", "org_phone_email")
+        field("Denetleyen", "inspector_name")
 
         section("EK OLCUMLER (varsa)")
         field("Ort. Flicker Faktoru", "flicker_avg")
@@ -3116,7 +3157,7 @@ class ReportScreen(Screen):
             pdf.set_y(-30)
             pdf.set_font(BASE_FONT, "", 9)
             pdf.set_text_color(*MUTED)
-            pdf.cell(0, 5, ORG_NAME, align="C", ln=True)
+            pdf.cell(0, 5, data["fifa_info"].get("org_name", ORG_NAME), align="C", ln=True)
             pdf.cell(0, 5, f"Rapor olusturma tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
                      align="C", ln=True)
             pdf.set_text_color(0, 0, 0)
@@ -3685,7 +3726,7 @@ class ReportScreen(Screen):
             pdf.set_y(-30)
             pdf.set_font(BASE_FONT, "", 9)
             pdf.set_text_color(*MUTED)
-            pdf.cell(0, 5, ORG_NAME, align="C", ln=True)
+            pdf.cell(0, 5, data["fifa_info"].get("org_name", ORG_NAME), align="C", ln=True)
             pdf.cell(0, 5, f"{t('report_created')}: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
                      align="C", ln=True)
             pdf.set_text_color(0, 0, 0)
@@ -3730,18 +3771,18 @@ class ReportScreen(Screen):
             fifa_lum_row(t("model_product_type"), "model")
 
             pdf.ln(2)
-            fifa_row(t("illuminance_meter_used"), METER_MODEL)
-            fifa_row(t("serial_illuminance_meter"), METER_SERIAL)
+            fifa_row(t("illuminance_meter_used"), fifa.get("meter_model", METER_MODEL))
+            fifa_row(t("serial_illuminance_meter"), fifa.get("meter_serial", METER_SERIAL))
             fifa_row(t("calibration_date"), fifa.get("cal_date"))
             probe_labels = [
-                (t("probe_serial", n=0), "Eh"),
-                (t("probe_serial", n=1), "Ev0"),
-                (t("probe_serial", n=2), "Ev90"),
-                (t("probe_serial", n=3), "Ev180"),
-                (t("probe_serial", n=4), "Ev270"),
+                (t("probe_serial", n=0), "probe_serial_eh", "Eh"),
+                (t("probe_serial", n=1), "probe_serial_ev0", "Ev0"),
+                (t("probe_serial", n=2), "probe_serial_ev90", "Ev90"),
+                (t("probe_serial", n=3), "probe_serial_ev180", "Ev180"),
+                (t("probe_serial", n=4), "probe_serial_ev270", "Ev270"),
             ]
-            for label, probe_key in probe_labels:
-                fifa_row(label, PROBE_SERIALS[probe_key])
+            for label, fifa_key, probe_key in probe_labels:
+                fifa_row(label, fifa.get(fifa_key, PROBE_SERIALS[probe_key]))
 
             pdf.ln(2)
             fifa_row(t("colour_meter_used"), fifa.get("colour_meter"))
@@ -3762,18 +3803,18 @@ class ReportScreen(Screen):
             pdf.cell(0, 8, l_val, border=1, align="C", ln=True)
 
             pdf.ln(2)
-            fifa_row(t("organisation_inspecting"), ORG_NAME)
+            fifa_row(t("organisation_inspecting"), fifa.get("org_name", ORG_NAME))
             pdf.set_font(BASE_FONT, "", 10)
             pdf.set_fill_color(*BRAND_TINT)
             addr_y = pdf.get_y()
             pdf.multi_cell(75, 8, t("address"), border=1, fill=True)
             addr_h = pdf.get_y() - addr_y
             pdf.set_xy(75 + 10, addr_y)
-            pdf.multi_cell(0, 8, ORG_ADDRESS, border=1)
+            pdf.multi_cell(0, 8, fifa.get("org_address", ORG_ADDRESS), border=1)
             val_h = pdf.get_y() - addr_y
             pdf.set_y(addr_y + max(addr_h, val_h))
-            fifa_row(t("telephone_email"), ORG_PHONE_EMAIL)
-            fifa_row(t("inspection_by"), INSPECTOR_NAME)
+            fifa_row(t("telephone_email"), fifa.get("org_phone_email", ORG_PHONE_EMAIL))
+            fifa_row(t("inspection_by"), fifa.get("inspector_name", INSPECTOR_NAME))
             fifa_row(t("signature"), "")
 
             # ============================================================
@@ -4315,7 +4356,7 @@ class ReportScreen(Screen):
                              text_size=(dp(300), None))
         info_card.add_widget(count_label)
         cam_label = Label(text=f"PPA Kenar Payi: {data['ppa_margin']} halka   |   "
-                                f"EC: Alici Kafa No.0 (elle girilir)",
+                                f"EC: Alici Kafa No.0 (ayri olcum)",
                            font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
                            height=dp(18), halign="left", text_size=(dp(300), None))
         info_card.add_widget(cam_label)
