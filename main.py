@@ -723,13 +723,19 @@ class MeasureScreen(Screen):
 
         # --- Aktif nokta karti (yesil vurgulu) ---
         self.point_card = Card(bg_color=SUCCESS_TINT, radius=14, border_color=SUCCESS,
-                                size_hint_y=None, height=dp(58), padding=[dp(16), 0, dp(16), 0])
-        point_row = BoxLayout()
-        point_row.add_widget(Label(text="Aktif nokta", font_size=sp(13), color=SUCCESS,
-                                    size_hint_x=0.45))
-        self.active_point_label = Label(text="Izgarayi baslatin", font_size=sp(15), bold=True, color=TEXT)
+                                size_hint_y=None, padding=[dp(16), dp(10), dp(16), dp(10)])
+        point_row = BoxLayout(size_hint_y=None, height=dp(38))
+        point_label_left = Label(text="Aktif nokta", font_size=sp(13), color=SUCCESS,
+                                  size_hint_x=0.4, halign="left", valign="middle")
+        point_row.add_widget(point_label_left)
+        self.active_point_label = Label(text="Izgarayi baslatin", font_size=sp(14), bold=True,
+                                         color=TEXT, size_hint_x=0.6, halign="right", valign="middle",
+                                         shorten=True, shorten_from="left")
         point_row.add_widget(self.active_point_label)
+        for lbl in (point_label_left, self.active_point_label):
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
         self.point_card.add_widget(point_row)
+        self.point_card.bind(minimum_height=self.point_card.setter("height"))
         root.add_widget(self.point_card)
 
         # --- OLC butonu ---
@@ -877,6 +883,7 @@ class MeasureScreen(Screen):
         self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
         self.current_index = self.frontier_index
         self.row_widgets = {}
+        self._rebuild_table_header()
         self.table_body.clear_widgets()
         for idx in sorted(self.measurements.keys()):
             self._render_row(idx)
@@ -1255,6 +1262,11 @@ class MeasureScreen(Screen):
             return
         self.measure_btn.disabled = True
         self._measure_spinner = TextSpinner(self.measure_btn, "OLCUM ALINIYOR...")
+        # Bu istegi EN YENI nesil olarak isaretle - boylece daha once baslamis
+        # ama GEC biten bir arka plan baglanti kontrolu, bu olcumun dogru
+        # sonucunu SONRADAN ezemez (bkz. _on_measurement_result).
+        self._conn_check_gen += 1
+        self._measurement_gen = self._conn_check_gen
         threading.Thread(target=self._do_measurement_fetch, daemon=True).start()
 
     def _do_measurement_fetch(self):
@@ -1274,7 +1286,13 @@ class MeasureScreen(Screen):
         if getattr(self, "_measure_spinner", None):
             self._measure_spinner.stop()
             self._measure_spinner = None
-        self._apply_connection_status(status)
+        # bu olcum sonucu, kendi baslattigi nesilden DAHA YENI bir kontrol
+        # baslamadiysa gecerli - eger baslamissa (kullanici cok hizli baska
+        # bir sey tetiklediyse) o daha yeni sonucu ezmeyelim
+        my_gen = getattr(self, "_measurement_gen", None)
+        if my_gen is None or my_gen >= self._conn_check_gen:
+            self._conn_check_gen = my_gen if my_gen is not None else self._conn_check_gen
+            self._apply_connection_status(status)
         self.measure_btn.text = "OLCUM AL"
 
         if status == "disconnected":
@@ -1756,27 +1774,24 @@ class StandardsScreen(Screen):
         card.add_widget(Label(text="FIBA Resmi Basketbol Aydinlatma Standardi", font_size=sp(14),
                                bold=True, color=TEXT, size_hint_y=None, height=dp(24),
                                halign="left", text_size=(dp(300), None)))
+
+        ppa = FIBA_STANDARDS["PPA"]
+        tpa = FIBA_STANDARDS["TPA"]
         info_text = (
-            "Uc farkli isik turu kontrol edilir:\n\n"
-            "- EC (Kamera): TV kamerasinin gordugu isik. Ortalama en az "
-            "2000 lux olmali.\n\n"
-            "- EV (Dikey): Oyuncularin 4 yonden gorunurlugu. Ortalama en az "
-            "1700 lux olmali. Ayrica 4 yon birbirine yakin olmali (en dusuk "
-            "yonun en yuksek yone orani en az 0.6).\n\n"
-            "- EH (Yatay): Zeminin aydinligi. Ortalama 1500 ile 3000 lux "
-            "ARASINDA olmali - cok fazla parlak olmasi da istenmiyor.\n\n"
-            "Her turun kendi icinde bir de DUZGUNLUK sarti var: en dusuk "
-            "deger / en yuksek deger, ve en dusuk deger / ortalama - ikisi "
-            "de belirli bir esigin uzerinde olmali (yani saha genelinde "
-            "isik cok degisken olmamali).\n\n"
-            "Saha iki ayri bolgeye ayrilarak degerlendirilir:\n"
-            "- PPA: sahanin kendisi (19x32m) - daha sikı kurallar\n"
-            "- TPA: saha + cevresindeki serit (22x35m) - biraz daha esnek\n\n"
-            "Bu standart secildiginde izgara otomatik 17x11 olur. En "
-            "distaki nokta halkasi sadece TPA'yi, ic kisim hem PPA hem "
-            "TPA'yi temsil eder.\n\n"
-            "Isik kaynagi icin ayrica: Titresim en fazla %1, Renk gosterimi "
-            "en az 80, Renk sicakligi 4000-6000K arasinda olmali."
+            f"PPA - Ana Oyun Alani (19x32m):\n"
+            f"1. EC (Kamera):  ort > {ppa['ec_avg']} lx\n"
+            f"    Duzgunluk: U1 >= {ppa['ec_u1']:.2f}   U2 >= {ppa['ec_u2']:.2f}\n"
+            f"2. EV (0/90/180/270 - her biri ayri):  ort > {ppa['ev_avg']} lx\n"
+            f"    Duzgunluk: U1 >= {ppa['ev_u1']:.2f}   U2 >= {ppa['ev_u2']:.2f}\n"
+            f"    Yon Dengesi (min/maks): >= {ppa['ev_dir_ratio']:.2f}\n"
+            f"3. EH (Yatay):  ort {ppa['eh_avg_min']}-{ppa['eh_avg_max']} lx arasi\n"
+            f"    Duzgunluk: U1 >= {ppa['eh_u1']:.2f}   U2 >= {ppa['eh_u2']:.2f}\n\n"
+            f"TPA - Toplam Oyun Alani (22x35m):  ayni degerler, sadece Duzgunluk\n"
+            f"esikleri biraz daha toleransli (U1 >= {tpa['ec_u1']:.2f}, U2 >= {tpa['ec_u2']:.2f})\n\n"
+            f"Isik kaynagi:  Titresim <= %1   Renk gosterimi >= 80   "
+            f"Renk sicakligi 4000-6000K\n\n"
+            f"Izgara:  secilince otomatik 17 x 11 olur. En distaki nokta "
+            f"halkasi TPA, ic kisim hem PPA hem TPA sayilir."
         )
         info_lbl = Label(text=info_text, font_size=sp(12), color=TEXT_MUTED,
                           size_hint_y=None, halign="left", valign="top")
@@ -1784,9 +1799,8 @@ class StandardsScreen(Screen):
         info_lbl.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1]))
         card.add_widget(info_lbl)
 
-        ec_note = Label(text="EC (ana kamera) degeri, Olcum ekraninda her nokta icin "
-                              "Alici Kafa No.0 (Eh ile ayni fiziksel prob, kameraya "
-                              "cevrilerek) ile elle girilir.",
+        ec_note = Label(text="EC degeri: Olcum ekraninda, her nokta icin Alici Kafa "
+                              "No.0 (kameraya cevrilerek) ile elle girilir.",
                          font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
                          halign="left", valign="top")
         ec_note.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
@@ -2595,11 +2609,13 @@ class ControlScreen(Screen):
         def summary_row(label, symbol, value_text):
             row = BoxLayout(size_hint_y=None, height=dp(24))
             row.add_widget(Label(text=label, font_size=sp(13), color=TEXT_MUTED,
-                                  halign="left", text_size=(dp(170), None), size_hint_x=0.55))
+                                  halign="left", valign="middle", size_hint_x=0.55))
             row.add_widget(Label(text=symbol, font_size=sp(13), color=TEXT_MUTED,
-                                  halign="left", text_size=(dp(90), None), size_hint_x=0.25))
+                                  halign="left", valign="middle", size_hint_x=0.25))
             row.add_widget(Label(text=value_text, font_size=sp(13.5), bold=True, color=TEXT,
-                                  halign="right", text_size=(dp(90), None), size_hint_x=0.35))
+                                  halign="right", valign="middle", size_hint_x=0.35))
+            for lbl in row.children:
+                lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
             return row
 
         def build_summary_card(title, pos_values):
@@ -2683,13 +2699,21 @@ class ReportScreen(Screen):
         self._build_report()
 
     def _show_message_popup(self, title, message):
+        # Uzun dosya yollari gibi BOSLUKSUZ metinler Kivy'nin kelime-bazli satir
+        # sarma mantigini atlayip popup disina taşabiliyor. "/" karakterinden
+        # sonra GORUNMEZ bir satir kirma firsati (zero-width space) ekleyerek
+        # bunu onluyoruz - gorsel bosluk degismez, sadece sarma noktasi eklenir.
+        message = message.replace("/", "/\u200b")
         content = PopupContent(padding=dp(18), spacing=dp(14))
         _popup_title_lbl = Label(text=title, font_size=sp(16), bold=True, color=TEXT,
                                  size_hint_y=None, height=dp(30), halign="left")
         _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
         content.add_widget(_popup_title_lbl)
-        content.add_widget(Label(text=message, font_size=sp(13.5), color=TEXT, halign="center"))
-        popup = Popup(title="", content=content, size_hint=(0.85, 0.4),
+        msg_lbl = Label(text=message, font_size=sp(13.5), color=TEXT, halign="center",
+                         valign="middle")
+        msg_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        content.add_widget(msg_lbl)
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.45),
                        auto_dismiss=True, separator_color=BORDER, title_color=TEXT,
                        background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         close_btn = FlatButton(text="Tamam", bg_color=ACCENT, font_size=sp(14),
@@ -2706,8 +2730,7 @@ class ReportScreen(Screen):
             fpath = os.path.join(self._export_dir(), fname)
             with open(fpath, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            final_location = self._publish_to_downloads(fpath, fname, "application/json")
-            self._show_message_popup("Veri Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+            self._save_file_with_picker(fpath, fname, "application/json", "Veri Kaydedildi")
         except Exception as e:
             self._show_message_popup("Disa Aktarma Hatasi", f"Bir sorun olustu:\n{e}")
 
@@ -2918,7 +2941,7 @@ class ReportScreen(Screen):
 
     def _export_dir(self):
         """Gecici (herkese acik olmayan) calisma klasoru - dosya once buraya
-        yazilir, sonra _publish_to_downloads() ile gercek 'Indirilenler'e tasinir."""
+        yazilir, sonra _save_file_with_picker() ile kullanicinin sectigi konuma kaydedilir."""
         try:
             app = App.get_running_app()
             path = app.user_data_dir
@@ -2926,68 +2949,60 @@ class ReportScreen(Screen):
             path = "."
         return path
 
-    def _publish_to_downloads(self, temp_path, filename, mime_type):
-        """Gecici dosyayi telefonun HERKESE ACIK 'Indirilenler' klasorune tasir/kopyalar.
-        Android 10+ (API 29+): MediaStore uzerinden (guncel, onerilen yontem).
-        Android 9 ve altı: dogrudan public Downloads klasorune yazar.
-        Android disinda (masaustu test): dosya oldugu yerde kalir.
-        Basarili olursa kullaniciya gosterilecek AÇIKLAYICI konum metnini dondurur."""
+    def _save_file_with_picker(self, temp_path, filename, mime_type, success_title="Kaydedildi"):
+        """Android'in yerlesik 'Farkli Kaydet' dosya secicisini acar - kullanici
+        dosyayi telefonunda ISTEDIGI konuma (Indirilenler, Belgeler, Google
+        Drive, SD kart vb.) kaydedebilir. Android disinda (masaustu/test
+        ortaminda) dosya zaten _export_dir'de durur, sadece bilgi mesaji gosterilir."""
         try:
             from jnius import autoclass
-        except Exception:
-            # Android degil (masaustu/test ortami) - dosya zaten _export_dir'de duruyor
-            return temp_path
+            from android import activity as android_activity
+            Intent = autoclass("android.content.Intent")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            REQUEST_CODE = 4243
 
-        try:
-            Build_VERSION = autoclass('android.os.Build$VERSION')
-            sdk_int = Build_VERSION.SDK_INT
-
-            if sdk_int >= 29:
-                # --- Android 10+: MediaStore uzerinden Indirilenler'e yaz ---
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                context = PythonActivity.mActivity
-                ContentValues = autoclass('android.content.ContentValues')
-                MediaStore = autoclass('android.provider.MediaStore')
-
-                resolver = context.getContentResolver()
-                values = ContentValues()
-                values.put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
-                values.put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/")
-
-                downloads_uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                item_uri = resolver.insert(downloads_uri, values)
-                if item_uri is None:
-                    return temp_path  # basarisiz olursa eski (gizli) konumda kalsin
-
-                out_stream = resolver.openOutputStream(item_uri)
-                with open(temp_path, "rb") as f:
-                    data = f.read()
-                out_stream.write(data)
-                out_stream.close()
+            def on_activity_result(request_code, result_code, intent):
+                if request_code != REQUEST_CODE:
+                    return
                 try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-                return f"Indirilenler/{filename}"
-            else:
-                # --- Android 9 ve altı: dogrudan public Downloads klasorune yaz ---
-                Environment = autoclass('android.os.Environment')
-                public_dir = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-                os.makedirs(public_dir, exist_ok=True)
-                final_path = os.path.join(public_dir, filename)
-                with open(temp_path, "rb") as src, open(final_path, "wb") as dst:
-                    dst.write(src.read())
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-                return final_path
+                    if intent is None:
+                        return  # kullanici "Farkli Kaydet" penceresini iptal etti
+                    uri = intent.getData()
+                    if uri is None:
+                        return
+                    resolver = activity.getContentResolver()
+                    out_stream = resolver.openOutputStream(uri)
+                    with open(temp_path, "rb") as f:
+                        file_bytes = f.read()
+                    out_stream.write(file_bytes)
+                    out_stream.close()
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                    Clock.schedule_once(lambda dt: self._show_message_popup(
+                        success_title, f"'{filename}' secilen konuma kaydedildi."), 0)
+                except Exception as e:
+                    Clock.schedule_once(lambda dt, e=e: self._show_message_popup(
+                        "Kaydetme Hatasi", f"Dosya kaydedilemedi:\n{e}"), 0)
+                finally:
+                    android_activity.unbind(on_activity_result=on_activity_result)
+
+            android_activity.bind(on_activity_result=on_activity_result)
+
+            intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType(mime_type)
+            intent.putExtra(Intent.EXTRA_TITLE, filename)
+            activity.startActivityForResult(intent, REQUEST_CODE)
         except Exception:
-            # Herhangi bir Android-özel hata olursa, dosya en azindan
-            # gizli-ama-var olan eski konumda kalsin, uygulama çökmesin
-            return temp_path
+            # Android disinda (masaustu/test ortami) - eski davranisa don,
+            # dosya zaten calisma klasorunde duruyor
+            self._show_message_popup(
+                success_title,
+                f"Dosya kaydedildi:\n{filename}\n(bilgisayar/test ortaminda - "
+                "uygulamanin calisma klasorunde)")
 
     def _export_pdf_fiba(self):
         ms = self.measure_screen
@@ -3411,8 +3426,7 @@ class ReportScreen(Screen):
             fname = f"aydinlatma_raporu_FIBA_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
             pdf.output(fpath)
-            final_location = self._publish_to_downloads(fpath, fname, "application/pdf")
-            self._show_message_popup("PDF Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+            self._save_file_with_picker(fpath, fname, "application/pdf", "PDF Kaydedildi")
         except Exception as e:
             self._show_message_popup("PDF Hatasi", f"PDF olusturulurken bir sorun olustu:\n{e}")
 
@@ -4130,8 +4144,7 @@ class ReportScreen(Screen):
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
             pdf.output(fpath)
-            final_location = self._publish_to_downloads(fpath, fname, "application/pdf")
-            self._show_message_popup(t("pdf_saved"), f"{t('file_saved')}:\n{final_location}")
+            self._save_file_with_picker(fpath, fname, "application/pdf", t("pdf_saved"))
         except Exception as e:
             self._show_message_popup(t("pdf_error"), f"{t('pdf_error_msg')}:\n{e}")
 
@@ -4273,9 +4286,9 @@ class ReportScreen(Screen):
             fname = f"aydinlatma_raporu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             fpath = os.path.join(self._export_dir(), fname)
             wb.save(fpath)
-            final_location = self._publish_to_downloads(
-                fpath, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            self._show_message_popup("Excel Kaydedildi", f"Dosya kaydedildi:\n{final_location}")
+            self._save_file_with_picker(
+                fpath, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Excel Kaydedildi")
         except Exception as e:
             self._show_message_popup("Excel Hatasi", f"Excel olusturulurken bir sorun olustu:\n{e}")
 
@@ -4320,84 +4333,90 @@ class ReportScreen(Screen):
         self.content_area.add_widget(verdict_card)
 
         zone_titles = {"PPA": "PPA - Ana Oyun Alani", "TPA": "TPA - Toplam Oyun Alani"}
+        COLW = [0.34, 0.20, 0.20, 0.26]
+
+        def add_wide_row(container, text, bg):
+            wrap = TableRow(bg)
+            lbl = Label(text=text, font_size=sp(12.5), bold=True, color=TEXT)
+            wrap.add_widget(lbl)
+            container.add_widget(wrap)
+
+        def add_crit_row(container, kriter, referans, olculen, ok, pos):
+            row_bg = ROW_A if pos % 2 == 0 else ROW_B
+            row = TableRow(row_bg)
+            for i, (txt, col) in enumerate([
+                (kriter, TEXT_MUTED), (referans, TEXT_MUTED),
+                (olculen, GREEN_TXT if ok else RED_TXT),
+                ("UYGUN" if ok else "UYGUN DEGIL", GREEN_TXT if ok else RED_TXT),
+            ]):
+                lbl = Label(text=txt, font_size=sp(11), bold=(i >= 2), color=col, size_hint_x=COLW[i])
+                row.add_widget(lbl)
+            container.add_widget(row)
+
         for zone_name in ["PPA", "TPA"]:
             zone = data["zones"].get(zone_name)
             if zone is None:
                 continue
-            zone_card = Card(bg_color=CARD, radius=14, orientation="vertical",
-                              padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(8),
-                              size_hint_y=None)
             zone_ok = zone["zone_ok"]
-            zone_card.add_widget(Label(
+            zone_title_lbl = Label(
                 text=f"{zone_titles[zone_name]}  ({'UYGUN' if zone_ok else 'UYGUN DEGIL'})",
                 font_size=sp(14), bold=True, color=GREEN_TXT if zone_ok else RED_TXT,
-                size_hint_y=None, height=dp(22), halign="left", text_size=(dp(300), None)))
+                size_hint_y=None, height=dp(26), halign="left")
+            zone_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            self.content_area.add_widget(zone_title_lbl)
 
-            def crit_header():
-                row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(2))
-                for w, h in zip([0.34, 0.24, 0.24, 0.18],
-                                 ["Kriter", "Referans", "Olculen", "Sonuc"]):
-                    row.add_widget(Label(text=h, font_size=sp(10.5), bold=True, color=TEXT_MUTED,
-                                          size_hint_x=w, halign="left" if h == "Kriter" else "center",
-                                          valign="middle"))
-                return row
-
-            def crit_row(label, ref_str, val_str, ok):
-                row = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
-                row.add_widget(Label(text=label, font_size=sp(10.5), color=TEXT,
-                                      size_hint_x=0.34, halign="left", valign="middle",
-                                      shorten=True))
-                row.add_widget(Label(text=ref_str, font_size=sp(10.5), color=TEXT_MUTED,
-                                      size_hint_x=0.24, halign="center", valign="middle"))
-                row.add_widget(Label(text=val_str, font_size=sp(10.5), bold=True, color=TEXT,
-                                      size_hint_x=0.24, halign="center", valign="middle"))
-                row.add_widget(Label(text="UYGUN" if ok else "UYGUN DEGIL", font_size=sp(9.5),
-                                      bold=True, color=GREEN_TXT if ok else RED_TXT,
-                                      size_hint_x=0.18, halign="center", valign="middle"))
-                for lbl in row.children:
-                    lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
-                return row
+            table_card = Card(bg_color=CARD, radius=14, orientation="vertical", padding=0)
+            header = TableRow(HEADER_BG)
+            for i, h in enumerate(["Kriter", "Referans", "Olculen", "Sonuc"]):
+                header.add_widget(Label(text=h, font_size=sp(11), bold=True, color=TEXT_MUTED,
+                                         size_hint_x=COLW[i]))
+            table_card.add_widget(header)
 
             th = FIBA_STANDARDS[zone_name]
-            zone_card.add_widget(crit_header())
+            pos = 0
 
+            add_wide_row(table_card, "EC (Ana Kamera)", HEADER_BG)
             ec = zone["EC"]
             if ec["avg"] is not None:
-                zone_card.add_widget(crit_row("EC Ortalama >", f"{th['ec_avg']}", f"{ec['avg']:.0f}",
-                                               ec["avg"] >= th["ec_avg"]))
-                zone_card.add_widget(crit_row("EC Duz. U1 >=", f"{th['ec_u1']:.2f}",
-                                               f"{ec['u1']:.2f}", ec["u1"] >= th["ec_u1"]))
-                zone_card.add_widget(crit_row("EC Duz. U2 >=", f"{th['ec_u2']:.2f}",
-                                               f"{ec['u2']:.2f}", ec["u2"] >= th["ec_u2"]))
+                add_crit_row(table_card, "Ortalama >", f"{th['ec_avg']}", f"{ec['avg']:.0f}",
+                              ec["avg"] >= th["ec_avg"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U1 >=", f"{th['ec_u1']:.2f}", f"{ec['u1']:.2f}",
+                              ec["u1"] >= th["ec_u1"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U2 >=", f"{th['ec_u2']:.2f}", f"{ec['u2']:.2f}",
+                              ec["u2"] >= th["ec_u2"], pos); pos += 1
             else:
-                zone_card.add_widget(crit_row("EC", f">={th['ec_avg']}",
-                                               f"Olculmedi (0/{ec['total_count']})", False))
+                add_crit_row(table_card, "Olculmedi", f">={th['ec_avg']}",
+                              f"0/{ec['total_count']}", False, pos); pos += 1
 
             for d_name, d_res in zone["EV"]["per_direction"].items():
-                zone_card.add_widget(crit_row(f"EV {d_name} Ortalama >", f"{th['ev_avg']}",
-                                               f"{d_res['avg']:.0f}", d_res["avg"] >= th["ev_avg"]))
-                zone_card.add_widget(crit_row(f"EV {d_name} Duz. U1 >=", f"{th['ev_u1']:.2f}",
-                                               f"{d_res['u1']:.2f}", d_res["u1"] >= th["ev_u1"]))
-                zone_card.add_widget(crit_row(f"EV {d_name} Duz. U2 >=", f"{th['ev_u2']:.2f}",
-                                               f"{d_res['u2']:.2f}", d_res["u2"] >= th["ev_u2"]))
-            zone_card.add_widget(crit_row("EV Yon Dengesi >=", f"{th['ev_dir_ratio']:.2f}",
-                                           f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"]))
+                deg = {"Ev0": "0°", "Ev90": "90°", "Ev180": "180°", "Ev270": "270°"}[d_name]
+                add_wide_row(table_card, f"EV - Dikey {deg}", HEADER_BG)
+                add_crit_row(table_card, "Ortalama >", f"{th['ev_avg']}", f"{d_res['avg']:.0f}",
+                              d_res["avg"] >= th["ev_avg"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U1 >=", f"{th['ev_u1']:.2f}", f"{d_res['u1']:.2f}",
+                              d_res["u1"] >= th["ev_u1"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U2 >=", f"{th['ev_u2']:.2f}", f"{d_res['u2']:.2f}",
+                              d_res["u2"] >= th["ev_u2"], pos); pos += 1
 
+            add_wide_row(table_card, "EV - Yonler Arasi Denge", HEADER_BG)
+            add_crit_row(table_card, "Min/Maks >=", f"{th['ev_dir_ratio']:.2f}",
+                          f"{zone['EV']['dir_ratio']:.2f}", zone["EV"]["dir_ratio_ok"], pos); pos += 1
+
+            add_wide_row(table_card, "EH (Yatay)", HEADER_BG)
             eh = zone["EH"]
             if eh["avg"] is not None:
-                zone_card.add_widget(crit_row("EH Ortalama (aralik)",
-                                               f"{th['eh_avg_min']}-{th['eh_avg_max']}",
-                                               f"{eh['avg']:.0f}", eh["avg_ok"]))
-                zone_card.add_widget(crit_row("EH Duz. U1 >=", f"{th['eh_u1']:.2f}",
-                                               f"{eh['u1']:.2f}", eh["u1"] >= th["eh_u1"]))
-                zone_card.add_widget(crit_row("EH Duz. U2 >=", f"{th['eh_u2']:.2f}",
-                                               f"{eh['u2']:.2f}", eh["u2"] >= th["eh_u2"]))
+                add_crit_row(table_card, "Ortalama (aralik)", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                              f"{eh['avg']:.0f}", eh["avg_ok"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U1 >=", f"{th['eh_u1']:.2f}", f"{eh['u1']:.2f}",
+                              eh["u1"] >= th["eh_u1"], pos); pos += 1
+                add_crit_row(table_card, "Duzgunluk U2 >=", f"{th['eh_u2']:.2f}", f"{eh['u2']:.2f}",
+                              eh["u2"] >= th["eh_u2"], pos); pos += 1
             else:
-                zone_card.add_widget(crit_row("EH", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
-                                               f"Olculmedi (0/{eh['total_count']})", False))
+                add_crit_row(table_card, "Olculmedi", f"{th['eh_avg_min']}-{th['eh_avg_max']}",
+                              f"0/{eh['total_count']}", False, pos); pos += 1
 
-            zone_card.bind(minimum_height=zone_card.setter("height"))
-            self.content_area.add_widget(zone_card)
+            table_card.bind(minimum_height=table_card.setter("height"))
+            self.content_area.add_widget(table_card)
 
         # --- Isik Kaynagi (Tablo 6): Flicker/CRI/Renk Sicakligi - TPA'nin her noktasi
         #     icin gecerli, elle girilen bilgiler (Ek Rapor Bilgilerini Duzenle'den) ---
@@ -4412,11 +4431,13 @@ class ReportScreen(Screen):
         def ls_row(label, ref_str, val_str):
             row = BoxLayout(size_hint_y=None, height=dp(20))
             row.add_widget(Label(text=label, font_size=sp(11.5), color=TEXT_MUTED,
-                                  halign="left", text_size=(dp(140), None), size_hint_x=0.45))
+                                  halign="left", valign="middle", size_hint_x=0.45))
             row.add_widget(Label(text=ref_str, font_size=sp(11), color=TEXT_MUTED,
-                                  halign="center", text_size=(dp(100), None), size_hint_x=0.3))
+                                  halign="center", valign="middle", size_hint_x=0.3))
             row.add_widget(Label(text=val_str, font_size=sp(11.5), bold=True, color=TEXT,
-                                  halign="right", text_size=(dp(80), None), size_hint_x=0.25))
+                                  halign="right", valign="middle", size_hint_x=0.25))
+            for lbl in row.children:
+                lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
             return row
 
         ls_card.add_widget(ls_row("Flicker Faktoru", "<=%1", fifa.get("flicker_avg") or "-"))
@@ -4424,6 +4445,16 @@ class ReportScreen(Screen):
         ls_card.add_widget(ls_row("Renk Sicakligi", "4000-6000K", fifa.get("colour_temp_tc") or "-"))
         ls_card.bind(minimum_height=ls_card.setter("height"))
         self.content_area.add_widget(ls_card)
+
+        # --- Disa aktarma butonlari (FIFA/UEFA'da zaten vardi - FIBA'da UNUTULMUSTU) ---
+        export_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        pdf_btn = FlatButton(text="PDF Olarak Kaydet", bg_color=ACCENT, font_size=sp(13))
+        pdf_btn.bind(on_release=lambda b: self.export_pdf())
+        excel_btn = FlatButton(text="Excel Olarak Kaydet", bg_color=ACCENT, font_size=sp(13))
+        excel_btn.bind(on_release=lambda b: self.export_excel())
+        export_row.add_widget(pdf_btn)
+        export_row.add_widget(excel_btn)
+        self.content_area.add_widget(export_row)
 
     def _compute_report_data(self):
         """Rapor icin tum hesaplamalari yapar - hem ekran hem PDF/Excel disa aktarimi bunu kullanir."""
@@ -4667,7 +4698,8 @@ class ReportScreen(Screen):
         def make_field(label_text, key):
             row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
             lbl = Label(text=label_text, font_size=sp(12), color=TEXT_MUTED,
-                        size_hint_x=0.36, halign="left", text_size=(dp(105), None))
+                        size_hint_x=0.36, halign="left", valign="middle")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
             row.add_widget(lbl)
             field_card = Card(bg_color=CARD_LIGHT, radius=8)
             ti = ThemedTextInput(text=ms.project_info.get(key, ""), multiline=False, font_size=sp(13))
