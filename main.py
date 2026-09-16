@@ -1172,6 +1172,36 @@ class MeasureScreen(Screen):
         content.add_widget(btn_row)
         popup.open()
 
+    def reset_everything(self):
+        """Ayarlar > Tumunu Sifirla icin: butun olcumleri, EC verilerini,
+        FIBA tur durumunu VE proje/rapor bilgilerini (saha adi, tarih,
+        luminaire, renk olcer vb.) temizler. Kurulus/cihaz SABITLERI
+        (org adi, adres, cihaz/prob seri no) KORUNUR - bunlar proje
+        degil, ekipman/sirket bilgisi oldugu icin sifirlanmaz."""
+        self.measurements = {}
+        self.ec_values = {}
+        self.frontier_index = 0
+        self.current_index = 0
+        self.fiba_round = 1
+        self.fiba_step = 1
+        self.fiba_r2_current_index = 0
+        self.fiba_r2_frontier_index = 0
+        self.project_info = {"name": "", "location": "",
+                              "date": datetime.now().strftime("%d.%m.%Y"), "prepared_by": ""}
+        keep_keys = {"meter_model", "meter_serial", "probe_serial_eh", "probe_serial_ev0",
+                     "probe_serial_ev90", "probe_serial_ev180", "probe_serial_ev270",
+                     "org_name", "org_address", "org_phone_email", "inspector_name"}
+        for key in list(self.fifa_info.keys()):
+            if key not in keep_keys:
+                self.fifa_info[key] = ""
+        self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
+        self.row_widgets = {}
+        self.table_body.clear_widgets()
+        self.measure_btn.disabled = False
+        self._update_ec_row_visibility()
+        self._update_active_label()
+        self.save_session()
+
     def _recompute_sequence(self, start, clear_table=True):
         self.sequence = build_measurement_sequence(self.rows_count_val, self.cols_count_val)
         self.current_index = 0
@@ -1737,11 +1767,11 @@ class StandardsScreen(Screen):
         root.add_widget(org_row)
 
         # --- Seviye listesi ---
-        scroll = ScrollView(size_hint=(1, 1))
+        self.level_scroll = ScrollView(size_hint=(1, 1))
         self.level_list = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(6))
         self.level_list.bind(minimum_height=self.level_list.setter("height"))
-        scroll.add_widget(self.level_list)
-        root.add_widget(scroll)
+        self.level_scroll.add_widget(self.level_list)
+        root.add_widget(self.level_scroll)
 
         # --- Uygula butonu ---
         self.apply_btn = FlatButton(text="Bu Standardi Kullan", bg_color=ACCENT, radius=14,
@@ -1929,6 +1959,7 @@ class StandardsScreen(Screen):
         # sekmeye her girildiginde aktif standardi tekrar yansit
         ms = self.measure_screen
         self.active_label.text = f"{ms.org} · {ms.level}" if ms.level else ms.org
+        Clock.schedule_once(lambda dt: setattr(self.level_scroll, "scroll_y", 1), 0)
 
 
 def compute_maur_failures(by_pos, threshold):
@@ -2147,14 +2178,19 @@ class ControlScreen(Screen):
         # yakinlastirma yontemi, bu yuzden ekranda GORUNUR olmali.
         self.root_box.add_widget(zoom_row)
 
+        fit_btn = FlatButton(text="Tumunu Sigdir", bg_color=CARD_LIGHT, font_size=sp(13),
+                              size_hint_y=None, height=dp(38))
+        fit_btn.bind(on_release=self.fit_to_screen)
+        self.root_box.add_widget(fit_btn)
+
         # --- Icerik alani (her sekmeye girildiginde yeniden kurulur) ---
         self.content_area = BoxLayout(orientation="vertical", spacing=dp(10),
                                        size_hint_y=None)
         self.content_area.bind(minimum_height=self.content_area.setter("height"))
-        page_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True,
-                                  bar_width=dp(6))
-        page_scroll.add_widget(self.content_area)
-        self.root_box.add_widget(page_scroll)
+        self.page_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True,
+                                       bar_width=dp(6))
+        self.page_scroll.add_widget(self.content_area)
+        self.root_box.add_widget(self.page_scroll)
 
         self.add_widget(self.root_box)
         self._update_button_colors()
@@ -2180,6 +2216,28 @@ class ControlScreen(Screen):
     def reset_zoom(self):
         self.zoom = 1.0
         self.zoom_label.text = "100%"
+        self._build_heatmap()
+
+    def fit_to_screen(self, *a):
+        """Tum izgarayi (butun satir/sutunlari) kaydirmaya gerek kalmadan
+        tek seferde gorebilecek sekilde zoom seviyesini otomatik hesaplar."""
+        ms = self.measure_screen
+        satir_n, sutun_n = max(ms.rows_count_val, 1), max(ms.cols_count_val, 1)
+        scroll = getattr(self, "_heatmap_scroll", None)
+        if not scroll or scroll.width <= 0 or scroll.height <= 0:
+            return
+        avail_w = max(scroll.width - dp(14), dp(40))
+        avail_h = max(scroll.height - dp(14), dp(40))
+        # display_w = base*zoom*1.4*satir_n, display_h = base*zoom*sutun_n
+        zoom_w = avail_w / (self.base_cell_size * 1.4 * satir_n)
+        zoom_h = avail_h / (self.base_cell_size * sutun_n)
+        fit_zoom = min(zoom_w, zoom_h)
+        # "Sigdir" butonu, cok buyuk izgaralarda okunurlugu korumak icin
+        # +/- butonlarinin alt siniri olan 0.5'in altina da inebilir -
+        # amac HER NOKTAYI gorebilmek, bu yuzden asagi sinir daha genis (0.15).
+        fit_zoom = max(0.15, min(2.6, round(fit_zoom, 2)))
+        self.zoom = fit_zoom
+        self.zoom_label.text = f"{int(self.zoom * 100)}%"
         self._build_heatmap()
 
     def set_dataset(self, name):
@@ -2212,6 +2270,7 @@ class ControlScreen(Screen):
             self.current_dataset = "Eh"
         self._update_button_colors()
         self._build_heatmap()
+        Clock.schedule_once(lambda dt: setattr(self.page_scroll, "scroll_y", 1), 0)
 
     def on_leave(self, *a):
         if getattr(self, "_active_cell", None):
@@ -2676,9 +2735,9 @@ class ReportScreen(Screen):
         self.content_area = BoxLayout(orientation="vertical", spacing=dp(10), size_hint_y=None)
         self.content_area.bind(minimum_height=self.content_area.setter("height"))
 
-        scroll = ScrollView(size_hint=(1, 1))
-        scroll.add_widget(self.content_area)
-        self.root_box.add_widget(scroll)
+        self.scroll = ScrollView(size_hint=(1, 1))
+        self.scroll.add_widget(self.content_area)
+        self.root_box.add_widget(self.scroll)
 
         self.add_widget(self.root_box)
 
@@ -2688,6 +2747,11 @@ class ReportScreen(Screen):
 
     def on_pre_enter(self, *a):
         self._build_report()
+        # Onceki ziyarette kaydirma nerede birakildiysa (ornegin en altta)
+        # yeni icerik onunla KALMASIN - her girişte EN USTTEN baslasin.
+        # Icerigin yuksekligi bu FRAME'de henuz kesinlesmemis olabilecegi
+        # icin bir sonraki frame'e erteleniyor.
+        Clock.schedule_once(lambda dt: setattr(self.scroll, "scroll_y", 1), 0)
 
     def _show_message_popup(self, title, message):
         # Uzun dosya yollari gibi BOSLUKSUZ metinler Kivy'nin kelime-bazli satir
@@ -4996,6 +5060,27 @@ class SettingsScreen(Screen):
         data_btn_row.add_widget(import_data_btn)
         outer.add_widget(data_btn_row)
 
+        # --- Tehlikeli Bolge: tum olcum ve rapor verisini sifirla ---
+        danger_section_lbl = Label(text="TEHLIKELI BOLGE", font_size=sp(12), color=DANGER,
+                                    bold=True, size_hint_y=None, height=dp(24), halign="left")
+        danger_section_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        outer.add_widget(danger_section_lbl)
+
+        danger_info_lbl = Label(text="Tum olcumleri, izgarayi ve proje/rapor bilgilerini "
+                                      "(saha adi, tarih vb.) siler. Kurulus ve cihaz "
+                                      "bilgileri (sabit) etkilenmez. Bu islem GERI ALINAMAZ.",
+                                 font_size=sp(11.5), color=TEXT_MUTED, size_hint_y=None,
+                                 height=dp(48), halign="left", valign="top")
+        danger_info_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        danger_info_lbl.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        outer.add_widget(danger_info_lbl)
+
+        reset_all_btn = FlatButton(text="Tum Olcum ve Rapor Verilerini Sifirla",
+                                    bg_color=DANGER, font_size=sp(12.5), bold=True,
+                                    size_hint_y=None, height=dp(46))
+        reset_all_btn.bind(on_release=lambda b: self._confirm_reset_everything())
+        outer.add_widget(reset_all_btn)
+
         # --- Bilgi notu (ileride baska ayarlar buraya eklenecek) ---
         info_lbl = Label(text="Daha fazla ayar yakinda eklenecek.",
                           font_size=sp(12), color=TEXT_MUTED,
@@ -5009,6 +5094,54 @@ class SettingsScreen(Screen):
     def _update_bg(self, *a):
         self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
+
+    def _confirm_reset_everything(self):
+        content = PopupContent(padding=dp(18), spacing=dp(16))
+        _popup_title_lbl = Label(text="Tumunu Sifirla", font_size=sp(16), bold=True, color=TEXT,
+                                 size_hint_y=None, height=dp(30), halign="left")
+        _popup_title_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(_popup_title_lbl)
+        msg_lbl = Label(
+            text="TUM olcumler, izgara ve proje/rapor bilgileri\n(saha adi, tarih, luminaire, renk olcer vb.)\n"
+                 "silinecek.\n\nKurulus ve cihaz bilgileri (sabit) etkilenmez.\n\n"
+                 "Bu islem GERI ALINAMAZ. Emin misiniz?",
+            font_size=sp(14.5), color=TEXT, halign="center", valign="middle")
+        msg_lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        content.add_widget(msg_lbl)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
+        popup = Popup(title="", content=content, size_hint=(0.88, 0.55),
+                       auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
+        cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
+        confirm_btn = FlatButton(text="Evet, Tumunu Sil", bg_color=DANGER, font_size=sp(14))
+        cancel_btn.bind(on_release=lambda b: popup.dismiss())
+
+        def do_confirm(*a):
+            popup.dismiss()
+            self.measure_screen.reset_everything()
+            self._show_reset_done_popup()
+        confirm_btn.bind(on_release=do_confirm)
+        btn_row.add_widget(cancel_btn)
+        btn_row.add_widget(confirm_btn)
+        content.add_widget(btn_row)
+        popup.open()
+
+    def _show_reset_done_popup(self):
+        content = PopupContent(padding=dp(18), spacing=dp(14))
+        title = Label(text="Sifirlandi", font_size=sp(16), bold=True, color=TEXT,
+                      size_hint_y=None, height=dp(30), halign="left")
+        title.bind(size=lambda i, v: setattr(i, "text_size", v))
+        content.add_widget(title)
+        content.add_widget(Label(text="Tum olcum ve rapor verileri sifirlandi.",
+                                  font_size=sp(14), color=TEXT, halign="center"))
+        popup = Popup(title="", content=content, size_hint=(0.85, 0.35),
+                       auto_dismiss=True, separator_color=BORDER, title_color=TEXT,
+                       background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
+        close_btn = FlatButton(text="Tamam", bg_color=ACCENT, font_size=sp(14),
+                                size_hint_y=None, height=dp(46))
+        close_btn.bind(on_release=lambda b: popup.dismiss())
+        content.add_widget(close_btn)
+        popup.open()
 
     def _on_toggle_theme(self, *a):
         new_theme = "light" if CURRENT_THEME == "dark" else "dark"
