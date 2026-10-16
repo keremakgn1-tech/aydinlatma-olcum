@@ -1347,6 +1347,18 @@ class MeasureScreen(Screen):
                 "Pi'ye baglanildi ama cihazdan\nveri gelmiyor. T-10MA'nin USB\nbaglantisini kontrol edin.")
             return
 
+        # --- EKSIK PROB KORUMASI: bu adim icin gereken problardan biri bile
+        # okunamadiysa (None) olcumu KAYDETME - aksi halde nokta 'alinmis' sayilip
+        # bosluklu (--) satir kalir ve istatistikler eksik veriyle hesaplanirdi.
+        _need = self._required_probe_keys()
+        _missing = [k for k in _need if not data or data.get(k) is None]
+        if _missing:
+            self.measure_btn.disabled = False
+            self._show_connection_error(
+                "Su problardan deger okunamadi:\n" + ", ".join(_missing) +
+                "\n\nOlcum KAYDEDILMEDI. Kablo/prob\nbaglantisini kontrol edip\ntekrar olcum alin.")
+            return
+
         # Olculen degerler virgulden sonraki kismiyla karisik gorunuyordu -
         # bir sonraki tam sayiya (tavana) yuvarlayarak sade tam sayilar
         # olarak saklıyoruz. Bu, TEK bir noktada yapiliyor ki tablo, isi
@@ -1428,6 +1440,16 @@ class MeasureScreen(Screen):
         self._render_row(idx)
         self._update_active_label()
         self.save_session()
+
+    def _required_probe_keys(self):
+        """Su an alinacak olcum icin cihazdan GELMESI ZORUNLU prob anahtarlari."""
+        if self._fiba_round2_active():
+            return ["Eh"]                       # 2. tur: sadece yatay
+        if self.org == "FIBA" and self.fiba_round == 1:
+            if self.fiba_step == 1:
+                return ["Ev0", "Ev90", "Ev180", "Ev270"]
+            return ["Ev270"]                    # EC (kameraya cevrilmis prob)
+        return ["Eh", "Ev0", "Ev90", "Ev180", "Ev270"]
 
     def _show_connection_error(self, message):
         content = PopupContent(padding=dp(18), spacing=dp(14))
@@ -1882,6 +1904,11 @@ class StandardsScreen(Screen):
         entering_fiba = self.browse_org == "FIBA"
         leaving_fiba = ms_ref.org == "FIBA" and self.browse_org != "FIBA"
         has_data = len(ms_ref.measurements) > 0
+        # secilen standardin RESMI izgarasi (FIBA: 17x11, FIFA/UEFA maç: 96 nokta 12x8,
+        # Grade 2/3: 40 nokta 8x5 - bkz. STANDARDS[...]["auto_grid"])
+        _lv = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
+        target_rows, target_cols = (17, 11) if entering_fiba else _lv.get("auto_grid", (12, 8))
+        grid_differs = (ms_ref.rows_count_val, ms_ref.cols_count_val) != (target_rows, target_cols)
 
         if entering_fiba:
             msg = (f"Aktif standart\n{standard_label}\n"
@@ -1891,11 +1918,19 @@ class StandardsScreen(Screen):
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nFIBA'ya ozel EC verisi baska "
                    "standartlarla uyumlu olmadigindan, mevcut olcumler "
-                   "sifirlanacak.\n\nEmin misiniz?")
+                   f"sifirlanacak ve izgara {target_rows} x {target_cols} "
+                   "yapilacak.\n\nEmin misiniz?")
+        elif has_data and grid_differs:
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nMevcut izgaraniz "
+                   f"{ms_ref.rows_count_val} x {ms_ref.cols_count_val}, bu standardin "
+                   f"izgarasi {target_rows} x {target_cols}.\n\n"
+                   "'Olcumleri Koru' izgarayi ve verileri aynen birakir.\n"
+                   "'Izgarayi Uydur' izgarayi degistirir, olcumleri SILER.")
         elif has_data:
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nMevcut olcumleriniz KORUNACAK - "
-                   "izgara ve veriler aynen kalacak, sadece karsilastirilan "
+                   "izgara bu standartla zaten uyumlu, sadece karsilastirilan "
                    "standart degisecek.\n\nEmin misiniz?")
         else:
             level_values = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
@@ -1909,14 +1944,14 @@ class StandardsScreen(Screen):
         content.add_widget(msg_lbl)
         btn_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
         popup = Popup(title="", content=content,
-                       size_hint=(0.85, 0.5),
+                       size_hint=(0.9, 0.62),
                        auto_dismiss=False, separator_color=BORDER, title_color=TEXT,
                        background_color=(0,0,0,0), background='', separator_height=0, title_size=0)
         cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(14))
         confirm_btn = FlatButton(text="Evet, Uygula", bg_color=ACCENT, font_size=sp(14))
         cancel_btn.bind(on_release=lambda b: popup.dismiss())
 
-        def do_confirm(*a):
+        def do_confirm(*a, force_grid=False):
             popup.dismiss()
             ms = self.measure_screen
             ms.update_standard_badge(self.browse_org, self.preview_level)
@@ -1927,9 +1962,13 @@ class StandardsScreen(Screen):
                 ms.grid_value_label.text = "17 x 11"
                 ms._recompute_sequence(start=True)
                 ms.save_session()
-            elif leaving_fiba:
-                # FIBA'dan CIKILIYOR: EC sutunu/verisi baska standartlarla
-                # uyumsuz - izgarayi ve olcumleri temizleyerek karisikligi onle
+            elif leaving_fiba or (has_data and force_grid):
+                # FIBA'dan CIKILIYOR (EC verisi uyumsuz) ya da kullanici izgarayi
+                # standarda uydurmayi secti: yeni standardin RESMI izgarasini uygula,
+                # olcumleri temizle.
+                ms.rows_count_val = target_rows
+                ms.cols_count_val = target_cols
+                ms.grid_value_label.text = f"{target_rows} x {target_cols}"
                 ms._recompute_sequence(start=True)
                 ms.save_session()
             elif has_data:
@@ -1951,6 +1990,11 @@ class StandardsScreen(Screen):
             self.active_label.text = standard_label
         confirm_btn.bind(on_release=do_confirm)
         btn_row.add_widget(cancel_btn)
+        if has_data and grid_differs and not entering_fiba and not leaving_fiba:
+            confirm_btn.text = "Olcumleri Koru"
+            fit_btn = FlatButton(text="Izgarayi Uydur", bg_color=DANGER, font_size=sp(14))
+            fit_btn.bind(on_release=lambda b: do_confirm(force_grid=True))
+            btn_row.add_widget(fit_btn)
         btn_row.add_widget(confirm_btn)
         content.add_widget(btn_row)
         popup.open()
