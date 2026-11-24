@@ -2090,6 +2090,12 @@ class StandardsScreen(Screen):
         entering_fiba = self.browse_org == "FIBA"
         entering_free = self.browse_org == FREE_ORG
         leaving_fiba = ms_ref.org == "FIBA" and self.browse_org != "FIBA"
+        # Serbest olcumde sadece secili problar olculmus olabilir (digerleri None). Bu veri
+        # FIFA/UEFA/FIBA hesaplariyla UYUMSUZ - eksik probu olan olcum varsa sifirlanir.
+        leaving_free_incomplete = (
+            ms_ref.org == FREE_ORG and self.browse_org != FREE_ORG and any(
+                d["values"] is not None and any(d["values"].get(k) is None for k, _ in PROBES)
+                for d in ms_ref.measurements.values()))
         has_data = len(ms_ref.measurements) > 0
         # secilen standardin RESMI izgarasi (FIBA: 17x11, FIFA/UEFA maç: 96 nokta 12x8,
         # Grade 2/3: 40 nokta 8x5 - bkz. STANDARDS[...]["auto_grid"])
@@ -2103,6 +2109,12 @@ class StandardsScreen(Screen):
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nIzgara otomatik olarak 17 x 11 "
                    "yapilacak ve mevcut olcumler sifirlanacak.\n\nEmin misiniz?")
+        elif leaving_free_incomplete:
+            msg = (f"Aktif standart\n{standard_label}\n"
+                   "olarak degistirilecek.\n\nSerbest olcumde bazi problar olculmedigi icin "
+                   "bu veri standart hesaplariyla uyumlu degil: mevcut olcumler "
+                   f"sifirlanacak ve izgara {target_rows} x {target_cols} "
+                   "yapilacak.\n\nEmin misiniz?")
         elif leaving_fiba:
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nFIBA'ya ozel EC verisi baska "
@@ -2155,7 +2167,7 @@ class StandardsScreen(Screen):
                 ms.grid_value_label.text = "17 x 11"
                 ms._recompute_sequence(start=True)
                 ms.save_session()
-            elif leaving_fiba or (has_data and force_grid):
+            elif leaving_fiba or leaving_free_incomplete or (has_data and force_grid):
                 # FIBA'dan CIKILIYOR (EC verisi uyumsuz) ya da kullanici izgarayi
                 # standarda uydurmayi secti: yeni standardin RESMI izgarasini uygula,
                 # olcumleri temizle.
@@ -2187,7 +2199,7 @@ class StandardsScreen(Screen):
             self.active_label.text = standard_label
         confirm_btn.bind(on_release=do_confirm)
         btn_row.add_widget(cancel_btn)
-        if has_data and grid_differs and not entering_fiba and not leaving_fiba:
+        if has_data and grid_differs and not entering_fiba and not leaving_fiba and not leaving_free_incomplete:
             confirm_btn.text = "Olcumleri Koru"
             fit_btn = FlatButton(text="Izgarayi Uydur", bg_color=DANGER, font_size=sp(14))
             fit_btn.bind(on_release=lambda b: do_confirm(force_grid=True))
