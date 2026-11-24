@@ -130,6 +130,20 @@ I = {
     "fiba_grid_sub": ("Grid No 1 = sol üst köşe  ·  satırlar soldan sağa, sonra sağdan sola (yılan düzeni)  ·  kesikli çerçeve = PPA",
                       "Grid No 1 = top-left corner  ·  rows left to right, then right to left (snake)  ·  dashed frame = PPA"),
     "fiba_grid_cap": ("TPA 35 x 22 m  ·  kesikli = PPA 32 x 19 m  ·  saha 28 x 15 m", "TPA 35 x 22 m  ·  dashed = PPA 32 x 19 m  ·  court 28 x 15 m"),
+    "site": ("Tesis / proje adı", "Site / project name"),
+    "chip_free": ("SERBEST ÖLÇÜM", "FREE MEASUREMENT"),
+    "no_std": ("Standart yok (serbest ölçüm)", "None (free measurement)"),
+    "area": ("Alan (uzunluk x genişlik)", "Area (length x width)"),
+    "free_note": ("Bu rapor bir standarda göre değerlendirme içermez; ölçülen değerleri gösterir.",
+                  "This report contains no evaluation against a standard; it presents the measured values."),
+    "free_title": ("Ölçüm Sonuçları", "Measurement Results"),
+    "free_sub": ("{date}  ·  {n}/{t} nokta  ·  değerler ölçüldüğü gibidir", "{date}  ·  {n}/{t} points  ·  values as measured"),
+    "target": ("Hedef", "Target"),
+    "free_target_note": ("Hedef değerler kullanıcı tarafından girilmiştir; bir standart gereksinimi değildir.",
+                         "Target values were entered by the user; they are not a standard requirement."),
+    "targets_ok": ("GİRİLEN HEDEFLERİ KARŞILIYOR", "MEETS THE ENTERED TARGETS"),
+    "targets_fail": ("GİRİLEN HEDEFLERİ KARŞILAMIYOR", "DOES NOT MEET THE ENTERED TARGETS"),
+    "no_values": ("Bu düzlemde ölçüm yok", "No measurements in this plane"),
     "round1": ("1. tur: 4 dikey + EC", "Round 1: 4 vertical + EC"), "round2": ("2. tur: yatay (Eh)", "Round 2: horizontal (Eh)"),
 }
 # Standartlardaki sabit Turkce metinlerin Ingilizcesi (dil = en iken)
@@ -334,7 +348,7 @@ def _num(s):
     except Exception: return None
 
 
-def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fiba=False):
+def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fiba=False, plain=False):
     p.newpage("", cover=True)
     p.logo_img(LX, 16, 48)
     p.txt(LX, 92, 170, 5, kind_title, "M", 8.5, GRAY)
@@ -345,7 +359,7 @@ def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fib
     gx, gy, gw = 36, 150, 138; gh = gw * (W / L) if L else gw * .65; gh = min(gh, 80)
     p.rr(gx - 6, gy - 6, gw + 12, gh + 12, 4, CARD, LINE)
     p.set_draw_color(205, 205, 200); p.set_line_width(.4); p.rect(gx, gy, gw, gh)
-    p.line(gx + gw / 2, gy, gx + gw / 2, gy + gh); p.ellipse(gx + gw / 2 - 9, gy + gh / 2 - 9, 18, 18)
+    if not plain: p.line(gx + gw / 2, gy, gx + gw / 2, gy + gh); p.ellipse(gx + gw / 2 - 9, gy + gh / 2 - 9, 18, 18)
     pts = [(gx + r * gw / max(R - 1, 1), gy + c * gh / max(C - 1, 1)) for (r, c) in seq]
     p.set_draw_color(215, 215, 210); p.set_line_width(.25)
     for a, b in zip(pts, pts[1:]): p.line(a[0], a[1], b[0], b[1])
@@ -357,15 +371,15 @@ def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fib
     p.txt(LX, 268, CW, 4, "sahgroup.net  ·  " + datetime.now().strftime("%d.%m.%Y %H:%M"), "", 7, GRAY)
 
 
-def cover_sheet(p, t, proj, fi, std_name, grid_txt, fiba=False, areas_txt="", club=False):
+def cover_sheet(p, t, proj, fi, std_name, grid_txt, fiba=False, areas_txt="", club=False, free=False, head_keys=None):
     p.newpage(t("cs_title"), t("cs_sub"))
-    g = [(t("venue") if fiba else t("stadium"), proj.get("name"))]
+    g = [(t("site") if free else (t("venue") if fiba else t("stadium")), proj.get("name"))]
     if club: g.append((t("club"), fi.get("club_name")))
     g += [(t("city"), proj.get("location")), (t("insp_date"), proj.get("date")), (t("insp_time"), fi.get("inspection_time"))]
     if fiba: g.append((t("areas"), areas_txt))
     else:
         wv, lv = fi.get("pitch_width"), fi.get("pitch_length")
-        g.append((t("pitch"), f"{lv} x {wv} m" if (wv and lv) else ""))
+        g.append((t("area") if free else t("pitch"), f"{lv} x {wv} m" if (wv and lv) else ""))
     g.append((t("weather"), fi.get("weather")))
     y1 = kv_card(p, LX, 46, 87, t("general"), g)
     ins = [(t("org"), fi.get("org_name")), (t("addr"), fi.get("org_address")), (t("phone"), fi.get("org_phone_email")),
@@ -376,19 +390,23 @@ def cover_sheet(p, t, proj, fi, std_name, grid_txt, fiba=False, areas_txt="", cl
     cal = fi.get("cal_date") or ""
     rows = [(t("meter"), fi.get("meter_model") or "-", fi.get("meter_serial") or "-", cal or "-")]
     for i, k in enumerate(["probe_serial_eh", "probe_serial_ev0", "probe_serial_ev90", "probe_serial_ev180", "probe_serial_ev270"]):
+        if head_keys is not None and ["Eh", "Ev0", "Ev90", "Ev180", "Ev270"][i] not in head_keys: continue
         rows.append((t("head", n=i) + ("  (Eh)" if i == 0 else f"  (Ev {[0, 90, 180, 270][i - 1]}°)"), fi.get("meter_model") or "-", fi.get(k) or "-", "-"))
     rows.append((t("colour_meter"), fi.get("colour_meter") or "-", fi.get("colour_meter_serial") or "-", fi.get("colour_meter_cal_date") or "-"))
     y = table(p, LX, y, [62, 52, 32, 32], [t("item"), t("model"), t("serial"), t("cal")], rows, 6.4)
-    p.txt(LX, y + 1, CW, 4, t("cal_note"), "", 6.5, GRAY); y += 9
+    if not free: p.txt(LX, y + 1, CW, 4, t("cal_note"), "", 6.5, GRAY)
+    y += 9
     p.txt(LX, y, 100, 5, t("grid"), "B", 9); p.txt(LX + 30, y, 150, 5, grid_txt, "", 7.5, GRAY); y += 8
     if not fiba:
         kv_card(p, LX, y, CW, t("luminaires"), [(t("manufacturer"), fi.get("lum1_manufacturer")), (t("lum_model"), fi.get("lum1_model"))], 7)
 
 
-def grid_diagram(p, t, R, C, seq, L, W, fiba=False, ppa=None):
+def grid_diagram(p, t, R, C, seq, L, W, fiba=False, ppa=None, plain=False):
     PW = 144; PH = PW * (W / L) if L else 93; PH = min(PH, 100); x0, y0 = 34, 62; dx, dy = PW / max(R - 1, 1), PH / max(C - 1, 1)
     p.rr(x0 - 4, y0 - 4, PW + 8, PH + 8, 3, (255, 255, 255), LINE)
-    if not fiba:
+    if plain:
+        p.set_fill_color(240, 240, 237); p.rect(x0, y0, PW, PH, "F"); p.set_draw_color(205, 205, 200); p.set_line_width(.4); p.rect(x0, y0, PW, PH)
+    elif not fiba:
         p.set_fill_color(228, 238, 210); p.rect(x0, y0, PW, PH, "F"); p.set_draw_color(255, 255, 255); p.set_line_width(.5)
         p.rect(x0, y0, PW, PH); p.line(x0 + PW / 2, y0, x0 + PW / 2, y0 + PH)
         k = PW / L; p.ellipse(x0 + PW / 2 - 9.15 * k, y0 + PH / 2 - 9.15 * k, 18.3 * k, 18.3 * k)
@@ -664,6 +682,110 @@ def build_fiba_pdf(data, lang, fiba_standards, assets_dir, out_path):
                 p.txt(LX + 15, yy + 6, 100, 5, "-", "", 8, GRAY); continue
             a, mn, mx, u1, u2 = _stats(vals)
             for i, (la, v) in enumerate((("AVERAGE", f"{a:.0f}"), ("MINIMUM", f"{mn}"), ("MAXIMUM", f"{mx}"), ("U1", num(u1)), ("U2", num(u2)))): kpi(p, LX + 15 + i * 32.6, yy, 30, 18, t(la), v)
+    notes_page(p, t, fi.get("inspector_name") or "")
+    p.output(out_path)
+    return out_path
+
+
+# ===================================================================== SERBEST (standartsiz) OLCUM
+def build_free_pdf(data, lang, assets_dir, out_path):
+    """Standart secilmeden alinan olcum raporu. Hicbir standarda gore uygun/degil DEMEZ.
+    Kullanici hedef girdiyse yalnizca o hedeflerle karsilastirir (data['checks'])."""
+    t, num, val = make_translator(lang)
+    proj, fi = data["project_info"], data["fifa_info"]; R, C = data["rows_count"], data["cols_count"]
+    seq = data["raw_sequence"]; meas = data["raw_measurements"]; probes = data["probes"]; metrics = data["metrics"]
+    checks = data["checks"]; has_t = data["has_targets"]
+    name = proj.get("name") or "-"; p = Rep(name, assets_dir, t); gn = {rc: i + 1 for i, rc in enumerate(seq)}
+    Ld, Wd = _num(fi.get("pitch_length")), _num(fi.get("pitch_width")); L = Ld or float(R); W = Wd or float(C)
+    plane_name = {k: t("p_" + k) for k in PLANE_KEYS}; incomplete = data["measured_count"] < data["total_points"]
+    cover_page(p, t, name, t("rep_title"), t("chip_free"), proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), R, C, seq, L, W, plain=True)
+    cover_sheet(p, t, proj, fi, t("no_std"), f"{R} x {C}  ·  {data['total_points']} {t('points')}", free=True, head_keys=probes)
+
+    # --- sonuc ozeti
+    p.newpage(t("free_title"), t("free_sub", date=proj.get("date") or "-", n=data["measured_count"], t=data["total_points"]))
+    y = 46
+    if has_t:
+        ok = data["all_pass"]; p.rr(LX, y, CW, 14, 3, OK_BG if ok else BAD_BG)
+        p.txt(LX + 6, y + 1.8, CW - 12, 6, t("targets_ok") if ok else t("targets_fail"), "B", 10.5, OK_TX if ok else BAD_TX)
+        p.txt(LX + 6, y + 8, CW - 12, 5, t("free_target_note"), "", 7, OK_TX if ok else BAD_TX)
+    else:
+        p.rr(LX, y, CW, 12, 3, CARD, LINE); p.txt(LX + 6, y + 3, CW - 12, 6, t("free_note"), "M", 8, GRAY)
+    y += 18 if has_t else 16
+    if incomplete:
+        p.rr(LX, y, CW, 7, 2, WARN_BG); p.txt(LX + 4, y + .8, CW - 8, 5.4, t("incomplete", n=data["measured_count"], t=data["total_points"]), "M", 7, WARN_TX); y += 10
+    p.rr(LX, y, CW, 6.8, 1.6, BRAND)
+    hcols = ((t("metric"), 72, 0), (t("target"), 36, 72), (t("meas"), 34, 108), (t("status"), 36, 142)) if has_t else ((t("metric"), 72, 0), (t("meas"), 40, 72))
+    for s_, w, xx in hcols:
+        p.txt(LX + xx + 2, y + .6, w - 4, 5.6, s_, "B", 7, (255, 255, 255), "L" if xx == 0 else "C")
+    y += 7.6
+    for title in probes:
+        p.rr(LX, y, CW, 5.4, 1.2, (240, 240, 236)); p.rr(LX, y, 1.4, 5.4, .6, YEL); p.txt(LX + 4, y + .2, 120, 5, plane_name[title], "B", 7); y += 5.9
+        m = metrics.get(title)
+        if m is None:
+            p.txt(LX + 4, y, 120, 4.6, t("no_values"), "", 6.8, GRAY); y += 6.4; continue
+        ck = {c["key"]: c for c in checks.get(title, [])}
+        for key, lab, vs in (("avg", t("average"), f"{m['avg']:.0f}"), ("min", t("minimum"), f"{m['min']:.0f}"), ("max", t("maximum"), f"{m['max']:.0f}"),
+                             ("u1", t("u1m"), num(m["u1"])), ("u2", t("u2m"), num(m["u2"]))):
+            c = ck.get(key); ok = c["ok"] if c else None
+            p.txt(LX + 4, y, 70, 4.6, lab, "", 6.8, INK)
+            if c: p.txt(LX + 72, y, 36, 4.6, ">= " + (num(c["req"]) if key in ("u1", "u2") else f"{c['req']:g}"), "", 6.8, GRAY, "C")
+            elif has_t: p.txt(LX + 72, y, 36, 4.6, "-", "", 6.8, GRAY, "C")
+            p.txt(LX + (108 if has_t else 72), y, 34 if has_t else 40, 4.6, vs, "M", 6.8, INK if ok is not False else BAD_TX, "C")
+            if ok is not None: p.pill(LX + 150, y + .4, 20, 3.8, t("pass") if ok else t("fail"), ok, 5.3)
+            y += 5.0
+        y += 1.4
+    if has_t: p.txt(LX, y + 2, CW, 4, t("free_target_note"), "", 6.8, GRAY)
+
+    # --- izgara + sira
+    p.newpage(t("grid_title"), t("grid_sub"))
+    x0, y0, PW, PH = grid_diagram(p, t, R, C, seq, L, W, plain=True)
+    yy = y0 + PH + 16
+    if Ld and Wd:
+        p.txt(x0, yy, PW, 4, t("spacing", L=f"{Ld:g}", a=R - 1, sa=f"{Ld / max(R - 1, 1):.3f}".rstrip("0").rstrip("."), W=f"{Wd:g}", b=C - 1, sb=f"{Wd / max(C - 1, 1):.3f}".rstrip("0").rstrip(".")), "", 7, GRAY, "C"); yy += 12
+    else: yy += 4
+    lr, lc = seq[-1]; endpos = t("pos_bl") if lr == 0 else t("pos_br")
+    for i, (a, b) in enumerate(((t("start"), t("start_v")), (t("order"), t("order_v")), (t("end"), t("end_v", n=len(seq), pos=endpos)))):
+        x = LX + i * 60; p.txt(x, yy, 55, 4, a, "M", 6.5, GRAY); p.txt(x, yy + 4.5, 58, 5, b, "", 7)
+
+    # --- ham veri (yalnizca secilen problar)
+    rows_all = [(i + 1, meas[i]["values"]) for i in range(len(seq)) if i in meas]
+    k = len(probes); cwid = max(14, min(20, 76 // k)); WD = [14] + [cwid] * k
+    lab = {"Eh": "Eh", "Ev0": "Ev 0°", "Ev90": "Ev 90°", "Ev180": "Ev 180°", "Ev270": "Ev 270°"}
+    heads = ["Grid"] + [lab[x] for x in probes]; per_page = 96
+    for pg in range(0, max(len(rows_all), 1), per_page):
+        chunk = rows_all[pg:pg + per_page]; half = (len(chunk) + 1) // 2
+        p.newpage(t("raw_title"), t("raw_sub"))
+        for h_ in range(2):
+            part = chunk[h_ * half:(h_ + 1) * half]
+            if not part: continue
+            x = LX + h_ * 90; p.rr(x, 44, sum(WD), 6.2, 1.4, BRAND); xx = x
+            for s_, w in zip(heads, WD): p.txt(xx, 44.4, w, 5.4, s_, "B", 6.5, (255, 255, 255), "C"); xx += w
+            for j, (gno, vals) in enumerate(part):
+                yy = 51 + j * 4.75
+                if j % 2: p.set_fill_color(*CARD); p.rect(x, yy, sum(WD), 4.75, "F")
+                xx = x
+                for kk, (v, w) in enumerate(zip([gno] + [vals.get(x_) for x_ in probes], WD)):
+                    p.txt(xx, yy + .3, w, 4.2, "-" if v is None else str(v), "B" if kk == 0 else "", 6.5, GRAY if kk == 0 else INK, "C"); xx += w
+
+    # --- isi haritalari
+    for title in probes:
+        m = metrics.get(title)
+        if m is None: continue
+        p.newpage(f"{t('map_title')}  ·  {plane_name[title]}", t("map_sub"))
+        g = {(d["r"], d["c"]): d["values"].get(title) for d in meas.values()}
+        cw = min(14.5, 168 / R); ch = min(14.5, 118 / C); x0 = (210 - R * cw) / 2; y0 = 56
+        lo, hi = heatmap(p, g, R, C, x0, y0, cw, ch, gn); dir_labels(p, x0, y0, R * cw, C * ch)
+        legend_bar(p, 70, y0 + C * ch + 12, 70, lo, hi)
+        ck = {c["key"]: c for c in checks.get(title, [])}
+        def rq(key, isnum):
+            c = ck.get(key)
+            return (f"{t('reqk')} " + (num(c["req"]) if isnum else f"{c['req']:g}")) if c else None
+        cards = [("AVERAGE", f"{m['avg']:.0f}", rq("avg", False), ck.get("avg", {}).get("ok")),
+                 ("MINIMUM", f"{m['min']:.0f}", rq("min", False), ck.get("min", {}).get("ok")),
+                 ("MAXIMUM", f"{m['max']:.0f}", None, None),
+                 ("U1", num(m["u1"]), rq("u1", True), ck.get("u1", {}).get("ok")),
+                 ("U2", num(m["u2"]), rq("u2", True), ck.get("u2", {}).get("ok"))]
+        for i, (la, v, rqs, ok) in enumerate(cards): kpi(p, LX + i * 36.25, 196, 33, 22, t(la), v, rqs, ok)
     notes_page(p, t, fi.get("inspector_name") or "")
     p.output(out_path)
     return out_path

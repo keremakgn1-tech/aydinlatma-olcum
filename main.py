@@ -276,6 +276,23 @@ STANDARDS = {
 
 PROBES = [("Eh", "Eh"), ("Ev0", "Ev"), ("Ev90", "Ev"), ("Ev180", "Ev"), ("Ev270", "Ev")]
 
+# --- SERBEST OLCUM: hicbir standarda baglanmayan manuel olcum. Izgara serbest, problar
+# kullanici secer, hedef degerler ISTEGE BAGLI (girilmezse hicbir karsilastirma yapilmaz).
+FREE_ORG = "Serbest"
+FREE_TARGET_FIELDS = [("Eh_avg", "Ort. >="), ("Eh_min", "Min. >="), ("Eh_u1", "U1 >="), ("Eh_u2", "U2 >="),
+                      ("Ev_avg", "Ort. >="), ("Ev_min", "Min. >="), ("Ev_u1", "U1 >="), ("Ev_u2", "U2 >=")]
+
+
+def parse_free_targets(raw):
+    """{'Eh_avg': '500', ...} -> {'Eh_avg': 500.0}. Bos/gecersiz girisler atlanir."""
+    out = {}
+    for k, v in (raw or {}).items():
+        try:
+            out[k] = float(str(v).replace(",", ".").strip())
+        except Exception:
+            pass
+    return out
+
 # --- Sabit olcum cihazi bilgileri (gercek donanimla eslesiyor - degismez) ---
 METER_MODEL = "Konica Minolta T-10A"
 METER_SERIAL = "20022401"
@@ -794,6 +811,8 @@ class MeasureScreen(Screen):
             "org_phone_email": ORG_PHONE_EMAIL, "inspector_name": INSPECTOR_NAME,
         }
         self.report_language = "tr"  # "tr" veya "en" - PDF raporunun dili
+        self.free_probes = ["Eh"]  # Serbest olcum: hangi problar olculuyor / raporda yer alir
+        self.free_targets = {}  # Serbest olcum: ISTEGE BAGLI hedefler (bos = karsilastirma yok)
         self.fiba_ppa_margin = 1  # TPA sinirindan PPA'ya kac "halka" ic - varsayilan 1
         self.ec_values = {}  # idx -> deger: FIBA "EC" (270 probu kameraya cevrilerek, IKINCI Pi olcumu)
         self.fiba_round = 1  # FIBA: 1=dikey+EC turu, 2=yatay (Eh) turu
@@ -834,6 +853,8 @@ class MeasureScreen(Screen):
             "project_info": self.project_info,
             "fifa_info": self.fifa_info,
             "report_language": self.report_language,
+            "free_probes": self.free_probes,
+            "free_targets": self.free_targets,
             "fiba_ppa_margin": self.fiba_ppa_margin,
             "ec_values": {str(k): v for k, v in self.ec_values.items()},
             "fiba_round": self.fiba_round,
@@ -878,6 +899,8 @@ class MeasureScreen(Screen):
         self.project_info.update(data.get("project_info", {}))
         self.fifa_info.update(data.get("fifa_info", {}))
         self.report_language = data.get("report_language", self.report_language)
+        self.free_probes = data.get("free_probes", self.free_probes) or ["Eh"]
+        self.free_targets = data.get("free_targets", self.free_targets) or {}
         self.fiba_ppa_margin = data.get("fiba_ppa_margin", self.fiba_ppa_margin)
         raw_ec = data.get("ec_values", {})
         self.ec_values = {int(k): v for k, v in raw_ec.items()} if raw_ec else {}
@@ -1037,10 +1060,128 @@ class MeasureScreen(Screen):
         self.level = level
         self.badge_label.text = f"{org} · {level}" if level else org
         self._update_ec_row_visibility()
-        self._rebuild_table_header()
+        self._rebuild_table_full()
         if hasattr(self, "sequence") and self.sequence:
             self._update_active_label()
         self.save_session()
+
+    def _rebuild_table_full(self):
+        """Baslik + TUM satirlar yeniden (sutun sayisi degisebildigi icin: Serbest <-> standart)."""
+        self._rebuild_table_header()
+        if not hasattr(self, "table_body"):
+            return
+        self.table_body.clear_widgets()
+        self.row_widgets = {}
+        for idx in sorted(self.measurements.keys()):
+            self._render_row(idx)
+
+    def _open_free_settings_popup(self, on_done=None):
+        """Serbest olcum: hangi problar olculur + ISTEGE BAGLI hedef degerler."""
+        content = PopupContent(padding=dp(16), spacing=dp(10))
+        content.add_widget(Label(text="Serbest Olcum Ayarlari", font_size=sp(17), bold=True, color=TEXT,
+                                  size_hint_y=None, height=dp(28)))
+        scroll = ScrollView(size_hint=(1, 1))
+        form = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8), padding=[0, dp(4), 0, dp(4)])
+        form.bind(minimum_height=form.setter("height"))
+
+        def section(text, sub=None):
+            lbl = Label(text=text, font_size=sp(12), bold=True, color=ACCENT, size_hint_y=None,
+                        height=dp(24), halign="left", valign="middle")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            form.add_widget(lbl)
+            if sub:
+                sl = Label(text=sub, font_size=sp(11), color=TEXT_MUTED, size_hint_y=None,
+                           halign="left", valign="top")
+                sl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+                sl.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1] + dp(2)))
+                form.add_widget(sl)
+
+        selected = set(self.free_probes)
+        pbtns = {}
+        names = {"Eh": "Eh", "Ev0": "Ev 0", "Ev90": "Ev 90", "Ev180": "Ev 180", "Ev270": "Ev 270"}
+
+        def paint(key):
+            on = key in selected
+            btn = pbtns[key]
+            new_bg = ACCENT if on else CARD_LIGHT
+            btn.bg_instr.rgba = new_bg
+            btn._base_color = new_bg
+            btn.color = text_color_for_bg(new_bg)
+
+        def toggle(key):
+            if key in selected:
+                selected.discard(key)
+            else:
+                selected.add(key)
+            paint(key)
+            warn.text = ""
+
+        section("OLCULECEK PROBLAR", "Secilen problar olcum tablosunda ve raporda yer alir. "
+                                       "Sadece secilenlerin okunmasi zorunludur.")
+        prow = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        for key, _kind in PROBES:
+            b = FlatButton(text=names[key], bg_color=CARD_LIGHT, font_size=sp(12.5))
+            b.bind(on_release=lambda btn, k=key: toggle(k))
+            pbtns[key] = b
+            prow.add_widget(b)
+        form.add_widget(prow)
+
+        inputs = {}
+        section("HEDEF DEGERLER (istege bagli)",
+                "Bos birakilan hedef icin karsilastirma YAPILMAZ. Hicbiri girilmezse rapor sadece "
+                "olculen degerleri gosterir. Dikey hedefler secili tum Ev yonleri icin gecerlidir.")
+        for prefix, title in (("Eh", "Yatay (Eh)"), ("Ev", "Dikey (Ev)")):
+            lbl = Label(text=title, font_size=sp(12.5), bold=True, color=TEXT, size_hint_y=None,
+                        height=dp(22), halign="left", valign="middle")
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+            form.add_widget(lbl)
+            grid = GridLayout(cols=4, size_hint_y=None, height=dp(40), spacing=dp(6))
+            for key, lab in FREE_TARGET_FIELDS:
+                if not key.startswith(prefix + "_"):
+                    continue
+                cell = BoxLayout(orientation="vertical", spacing=dp(1))
+                cell.add_widget(Label(text=lab, font_size=sp(10.5), color=TEXT_MUTED, size_hint_y=None, height=dp(14)))
+                fc = Card(bg_color=CARD_LIGHT, radius=8)
+                ti = ThemedTextInput(text=str(self.free_targets.get(key, "")), multiline=False,
+                                      font_size=sp(13), halign="center")
+                inputs[key] = ti
+                fc.add_widget(ti)
+                cell.add_widget(fc)
+                grid.add_widget(cell)
+            grid.height = dp(56)
+            form.add_widget(grid)
+
+        warn = Label(text="", font_size=sp(12), color=RED_TXT, size_hint_y=None, height=dp(18))
+        form.add_widget(warn)
+        for key in pbtns:
+            paint(key)
+        scroll.add_widget(form)
+        content.add_widget(scroll)
+
+        popup = Popup(title="", content=content, size_hint=(0.94, 0.82), auto_dismiss=False,
+                       background_color=(0, 0, 0, 0), background='', separator_height=0, title_size=0)
+
+        def do_save(*a):
+            if not selected:
+                warn.text = "En az bir prob secin."
+                return
+            self.free_probes = [k for k, _ in PROBES if k in selected]
+            self.free_targets = {k: ti.text.strip() for k, ti in inputs.items() if ti.text.strip()}
+            self._rebuild_table_full()
+            self.save_session()
+            popup.dismiss()
+            if on_done:
+                on_done()
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
+        cancel_btn = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(13))
+        cancel_btn.bind(on_release=lambda b: popup.dismiss())
+        save_btn = FlatButton(text="Kaydet", bg_color=SUCCESS, font_size=sp(13), bold=True)
+        save_btn.bind(on_release=do_save)
+        btn_row.add_widget(cancel_btn)
+        btn_row.add_widget(save_btn)
+        content.add_widget(btn_row)
+        popup.open()
 
     def _update_ec_row_visibility(self):
         pass  # manuel EC girisi kaldirildi - EC artik ikinci bir Pi olcumuyle otomatik alinir
@@ -1181,6 +1322,7 @@ class MeasureScreen(Screen):
         degil, ekipman/sirket bilgisi oldugu icin sifirlanmaz."""
         self.measurements = {}
         self.ec_values = {}
+        self.free_targets = {}
         self.frontier_index = 0
         self.current_index = 0
         self.fiba_round = 1
@@ -1450,6 +1592,8 @@ class MeasureScreen(Screen):
             if self.fiba_step == 1:
                 return ["Ev0", "Ev90", "Ev180", "Ev270"]
             return ["Ev270"]                    # EC (kameraya cevrilmis prob)
+        if self.org == FREE_ORG:
+            return list(self.free_probes) or ["Eh"]   # sadece SECILEN problar zorunlu
         return ["Eh", "Ev0", "Ev90", "Ev180", "Ev270"]
 
     def _show_connection_error(self, message):
@@ -1477,6 +1621,8 @@ class MeasureScreen(Screen):
         """FIFA/UEFA'da 5 sabit prob; FIBA'da ayrica EC (Kafa No.0, kameraya
         cevrilmis) sutunu da eklenir."""
         cols = [t for t, _ in PROBES]
+        if self.org == FREE_ORG:
+            cols = [t for t in cols if t in self.free_probes] or ["Eh"]
         if self.org == "FIBA":
             cols = cols + ["EC"]
         return cols
@@ -1782,7 +1928,7 @@ class StandardsScreen(Screen):
         # --- Organizasyon secici ---
         org_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         self.org_buttons = {}
-        for org_name in list(STANDARDS.keys()) + ["FIBA"]:
+        for org_name in list(STANDARDS.keys()) + ["FIBA", FREE_ORG]:
             btn = FlatButton(text=org_name, bg_color=CARD_LIGHT, font_size=sp(15))
             btn.bind(on_release=lambda b, o=org_name: self.set_browse_org(o))
             org_row.add_widget(btn)
@@ -1827,6 +1973,12 @@ class StandardsScreen(Screen):
             self._refresh_selection_marks()
             return
 
+        if org_name == FREE_ORG:
+            self.preview_level = ""
+            self._build_free_info_card()
+            self._refresh_selection_marks()
+            return
+
         for level_name, values in STANDARDS[org_name].items():
             card = LevelCard(org_name, level_name, values, on_tap=self.preview_select)
             self.level_list.add_widget(card)
@@ -1838,6 +1990,39 @@ class StandardsScreen(Screen):
         else:
             self.preview_level = None
         self._refresh_selection_marks()
+
+    def _build_free_info_card(self):
+        ms = self.measure_screen
+        card = Card(bg_color=CARD, radius=14, orientation="vertical", size_hint_y=None,
+                    padding=[dp(16), dp(14), dp(16), dp(14)], spacing=dp(8))
+        card.add_widget(Label(text="Serbest Olcum (standart yok)", font_size=sp(14), bold=True,
+                               color=TEXT, size_hint_y=None, height=dp(24), halign="left",
+                               text_size=(dp(300), None)))
+        info = ("Hicbir standarda baglanmayan manuel olcum.\n\n"
+                "- Izgara serbest: Olcum Verisi ekranindaki Izgara Ayarlari'ndan istediginiz "
+                "satir x sutunu girin.\n"
+                "- Problari siz secersiniz (sadece Eh, ya da Eh + dikey yonler).\n"
+                "- Hedef deger girmek ISTEGE BAGLI. Girmezseniz rapor hicbir seyle "
+                "karsilastirma yapmaz; sadece ort/min/maks/U1/U2 ve haritalari gosterir.")
+        lbl = Label(text=info, font_size=sp(12), color=TEXT_MUTED, size_hint_y=None, halign="left", valign="top")
+        lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+        lbl.bind(texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        card.add_widget(lbl)
+        cur = Label(text="", font_size=sp(12), color=TEXT, bold=True, size_hint_y=None, height=dp(20),
+                    halign="left", valign="middle")
+        cur.bind(size=lambda i, v: setattr(i, "text_size", v))
+
+        def refresh_cur():
+            names = {"Eh": "Eh", "Ev0": "Ev0", "Ev90": "Ev90", "Ev180": "Ev180", "Ev270": "Ev270"}
+            cur.text = "Secili problar: " + ", ".join(names[k] for k in ms.free_probes)
+        refresh_cur()
+        card.add_widget(cur)
+        btn = FlatButton(text="Prob ve Hedef Ayarlari", bg_color=ACCENT, font_size=sp(13.5), bold=True,
+                          size_hint_y=None, height=dp(46))
+        btn.bind(on_release=lambda b: ms._open_free_settings_popup(on_done=refresh_cur))
+        card.add_widget(btn)
+        card.bind(minimum_height=card.setter("height"))
+        self.level_list.add_widget(card)
 
     def _build_fiba_info_card(self):
         ms = self.measure_screen
@@ -1903,6 +2088,7 @@ class StandardsScreen(Screen):
 
         ms_ref = self.measure_screen
         entering_fiba = self.browse_org == "FIBA"
+        entering_free = self.browse_org == FREE_ORG
         leaving_fiba = ms_ref.org == "FIBA" and self.browse_org != "FIBA"
         has_data = len(ms_ref.measurements) > 0
         # secilen standardin RESMI izgarasi (FIBA: 17x11, FIFA/UEFA maç: 96 nokta 12x8,
@@ -1910,6 +2096,8 @@ class StandardsScreen(Screen):
         _lv = STANDARDS.get(self.browse_org, {}).get(self.preview_level, {})
         target_rows, target_cols = (17, 11) if entering_fiba else _lv.get("auto_grid", (12, 8))
         grid_differs = (ms_ref.rows_count_val, ms_ref.cols_count_val) != (target_rows, target_cols)
+        if entering_free:
+            grid_differs = False  # serbest olcumde izgara kullanicinin - hic dokunulmaz
 
         if entering_fiba:
             msg = (f"Aktif standart\n{standard_label}\n"
@@ -1921,6 +2109,10 @@ class StandardsScreen(Screen):
                    "standartlarla uyumlu olmadigindan, mevcut olcumler "
                    f"sifirlanacak ve izgara {target_rows} x {target_cols} "
                    "yapilacak.\n\nEmin misiniz?")
+        elif entering_free:
+            msg = ("Serbest olcum (standart yok) secilecek.\n\nIzgara ve mevcut olcumleriniz "
+                   "KORUNUR. Rapor hicbir standarda gore degerlendirme yapmaz; hedef deger "
+                   "girerseniz sadece onlarla karsilastirir.\n\nEmin misiniz?")
         elif has_data and grid_differs:
             msg = (f"Aktif standart\n{standard_label}\n"
                    "olarak degistirilecek.\n\nMevcut izgaraniz "
@@ -1971,6 +2163,10 @@ class StandardsScreen(Screen):
                 ms.cols_count_val = target_cols
                 ms.grid_value_label.text = f"{target_rows} x {target_cols}"
                 ms._recompute_sequence(start=True)
+                ms.save_session()
+            elif entering_free:
+                # Serbest olcum: izgaraya ve olcumlere HIC dokunma
+                ms._rebuild_table_full()
                 ms.save_session()
             elif has_data:
                 # AYNI AILE icinde (FIFA<->FIFA/UEFA) gecis YAPILIYOR ve
@@ -2301,11 +2497,14 @@ class ControlScreen(Screen):
     def on_pre_enter(self, *a):
         ms = self.measure_screen
         is_fiba = (ms.org == "FIBA")
-        if is_fiba and self.maur_mode:
-            self.maur_mode = False  # FIBA'da MAUR kavrami yok - zorla kapat
-        self.maur_btn.height = 0 if is_fiba else dp(40)
-        self.maur_btn.opacity = 0 if is_fiba else 1
-        self.maur_btn.disabled = is_fiba
+        no_maur = is_fiba or ms.org == FREE_ORG
+        if no_maur and self.maur_mode:
+            self.maur_mode = False  # FIBA ve Serbest olcumde MAUR kavrami yok - zorla kapat
+        self.maur_btn.height = 0 if no_maur else dp(40)
+        self.maur_btn.opacity = 0 if no_maur else 1
+        self.maur_btn.disabled = no_maur
+        if ms.org == FREE_ORG and ms.free_probes and self.current_dataset not in ms.free_probes:
+            self.current_dataset = ms.free_probes[0]
 
         ec_btn = self.dataset_buttons["EC"]
         ec_btn.size_hint_x = 1 if is_fiba else 0
@@ -3564,7 +3763,11 @@ class ReportScreen(Screen):
         """Yeni kurumsal rapor (report_pdf.py). Herhangi bir sorunda ESKI rapora duser."""
         ms = self.measure_screen
         fiba = ms.org == "FIBA"
-        data = self._compute_fiba_report_data() if fiba else self._compute_report_data()
+        free = ms.org == FREE_ORG
+        if free:
+            data = self._compute_free_report_data()
+        else:
+            data = self._compute_fiba_report_data() if fiba else self._compute_report_data()
         if not data:
             self._show_message_popup("PDF", "Once olcum girin, sonra rapor disa aktarilabilir.")
             return
@@ -3575,13 +3778,18 @@ class ReportScreen(Screen):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             fname = f"aydinlatma_raporu_{ts}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
-            if fiba:
+            if free:
+                report_pdf.build_free_pdf(data, lang, base, fpath)
+            elif fiba:
                 report_pdf.build_fiba_pdf(data, lang, FIBA_STANDARDS, base, fpath)
             else:
                 report_pdf.build_match_pdf(data, lang, STANDARDS, base, fpath)
         except Exception as e:
             import traceback
             traceback.print_exc()
+            if free:
+                self._show_message_popup("PDF Hatasi", f"PDF olusturulamadi:\n{type(e).__name__}: {e}")
+                return
             self._show_message_popup(
                 "Yeni rapor olusturulamadi",
                 f"Eski rapor bicimi kullanilacak.\n\nTeknik detay:\n{type(e).__name__}: {e}")
@@ -4309,6 +4517,9 @@ class ReportScreen(Screen):
 
     def export_excel(self):
         ms = self.measure_screen
+        if ms.org == FREE_ORG:
+            self._export_excel_free()
+            return
         if ms.org == "FIBA":
             self._show_message_popup(
                 "Excel (FIBA)",
@@ -4831,6 +5042,210 @@ class ReportScreen(Screen):
             "raw_measurements": {idx: dict(d) for idx, d in measured.items()},
         }
 
+    def _compute_free_report_data(self):
+        """Serbest (standartsiz) olcum: ort/min/maks/U1/U2 + ISTEGE BAGLI hedef karsilastirmasi.
+        Hedef girilmemisse 'checks' bos, 'all_pass' None - hicbir seyle karsilastirma yapilmaz."""
+        ms = self.measure_screen
+        probes = [k for k, _ in PROBES if k in ms.free_probes] or ["Eh"]
+        measured = {idx: d for idx, d in ms.measurements.items()
+                    if d["values"] is not None and any(d["values"].get(k) is not None for k in probes)}
+        if not measured:
+            return None
+        targets = parse_free_targets(ms.free_targets)
+        metrics, checks = {}, {}
+        has_targets, all_pass = False, True
+        for title, kind in PROBES:
+            if title not in probes:
+                continue
+            vals = [d["values"][title] for d in measured.values() if d["values"].get(title) is not None]
+            if not vals:
+                metrics[title] = None
+                continue
+            avg = sum(vals) / len(vals)
+            vmin, vmax = min(vals), max(vals)
+            u1 = (vmin / vmax) if vmax else 0
+            u2 = (vmin / avg) if avg else 0
+            metrics[title] = {"min": vmin, "max": vmax, "avg": avg, "u1": u1, "u2": u2, "count": len(vals)}
+            crit = []
+            for key, val in (("avg", avg), ("min", vmin), ("u1", u1), ("u2", u2)):
+                req = targets.get(f"{kind}_{key}")
+                if req is None:
+                    continue
+                ok = val >= req
+                crit.append({"key": key, "req": req, "val": val, "ok": ok})
+                has_targets = True
+                if not ok:
+                    all_pass = False
+            checks[title] = crit
+        return {
+            "org": FREE_ORG, "level": "",
+            "project_info": dict(ms.project_info), "fifa_info": dict(ms.fifa_info),
+            "rows_count": ms.rows_count_val, "cols_count": ms.cols_count_val,
+            "raw_sequence": list(ms.sequence),
+            "raw_measurements": {idx: dict(d) for idx, d in measured.items()},
+            "measured_count": len(measured), "total_points": len(ms.sequence),
+            "probes": probes, "metrics": metrics, "checks": checks,
+            "has_targets": has_targets, "all_pass": (all_pass if has_targets else None),
+        }
+
+    def _build_free_report_section(self):
+        ms = self.measure_screen
+        data = self._compute_free_report_data()
+        free_btn = FlatButton(text="Prob ve Hedef Ayarlari (serbest olcum)", bg_color=ACCENT,
+                               font_size=sp(13), bold=True, size_hint_y=None, height=dp(46))
+        free_btn.bind(on_release=lambda b: ms._open_free_settings_popup(on_done=self._build_report))
+        self.content_area.add_widget(free_btn)
+        if not data:
+            self.content_area.add_widget(Label(
+                text="Secili problar icin henuz olcum yok.", font_size=sp(13), color=TEXT_MUTED,
+                size_hint_y=None, height=dp(50)))
+            return
+
+        info_card = Card(bg_color=CARD, radius=14, orientation="vertical",
+                          padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(4), size_hint_y=None)
+        info_card.add_widget(Label(text="Serbest Olcum (standart yok)", font_size=sp(14), bold=True,
+                                    color=TEXT, size_hint_y=None, height=dp(22), halign="left",
+                                    text_size=(dp(300), None)))
+        incomplete = data["measured_count"] < data["total_points"]
+        info_card.add_widget(Label(
+            text=f"Izgara: {ms.rows_count_val} x {ms.cols_count_val}   |   "
+                 f"Olculen: {data['measured_count']}/{data['total_points']} nokta"
+                 + ("  (EKSIK)" if incomplete else ""),
+            font_size=sp(12.5), color=RED_TXT if incomplete else GREEN_TXT, bold=incomplete,
+            size_hint_y=None, height=dp(20), halign="left", text_size=(dp(300), None)))
+        info_card.bind(minimum_height=info_card.setter("height"))
+        self.content_area.add_widget(info_card)
+
+        if data["has_targets"]:
+            ok = data["all_pass"]
+            vc = Card(bg_color=SUCCESS_TINT if ok else DANGER_TINT, radius=14,
+                       border_color=SUCCESS if ok else DANGER, size_hint_y=None, height=dp(56),
+                       padding=[dp(16), 0, dp(16), 0])
+            vc.add_widget(Label(text="GIRILEN HEDEFLERI KARSILIYOR" if ok else "GIRILEN HEDEFLERI KARSILAMIYOR",
+                                 font_size=sp(14.5), bold=True, color=GREEN_TXT if ok else RED_TXT))
+            self.content_area.add_widget(vc)
+        else:
+            nc = Card(bg_color=CARD, radius=14, size_hint_y=None, height=dp(48),
+                       padding=[dp(16), 0, dp(16), 0])
+            nc.add_widget(Label(text="Hedef girilmedi - karsilastirma yapilmadi", font_size=sp(12.5),
+                                 color=TEXT_MUTED))
+            self.content_area.add_widget(nc)
+
+        COLW = [0.34, 0.20, 0.20, 0.26]
+        table_card = Card(bg_color=CARD, radius=14, orientation="vertical", padding=0, size_hint_y=None)
+        header = TableRow(HEADER_BG)
+        for i, h in enumerate(["Olcut", "Hedef", "Olculen", "Sonuc"]):
+            header.add_widget(Label(text=h, font_size=sp(11.5), bold=True, color=TEXT_MUTED, size_hint_x=COLW[i]))
+        table_card.add_widget(header)
+        plane_names = {"Eh": "Yatay (Eh)", "Ev0": "Dikey 0°", "Ev90": "Dikey 90°",
+                       "Ev180": "Dikey 180°", "Ev270": "Dikey 270°"}
+        for title in data["probes"]:
+            wrap = TableRow(HEADER_BG)
+            wrap.add_widget(Label(text=plane_names[title], font_size=sp(12.5), bold=True, color=TEXT))
+            table_card.add_widget(wrap)
+            m = data["metrics"].get(title)
+            if m is None:
+                row = TableRow(ROW_A)
+                row.add_widget(Label(text="Bu duzlemde olcum yok", font_size=sp(11.5), color=TEXT_MUTED))
+                table_card.add_widget(row)
+                continue
+            ck = {c["key"]: c for c in data["checks"].get(title, [])}
+            for pos, (key, lab, vs) in enumerate((
+                    ("avg", "Ortalama", f"{m['avg']:.0f}"), ("min", "Minimum", f"{m['min']:.0f}"),
+                    ("max", "Maksimum", f"{m['max']:.0f}"), ("u1", "U1 (min/maks)", f"{m['u1']:.2f}"),
+                    ("u2", "U2 (min/ort)", f"{m['u2']:.2f}"))):
+                c = ck.get(key)
+                ok = c["ok"] if c else None
+                ref = (f"{c['req']:.2f}" if key in ("u1", "u2") else f"{c['req']:g}") if c else "-"
+                row = TableRow(ROW_A if pos % 2 == 0 else ROW_B)
+                col = TEXT if ok is None else (GREEN_TXT if ok else RED_TXT)
+                for i, (txt, cc, bold) in enumerate([
+                        (lab, TEXT_MUTED, False), (ref, TEXT_MUTED, False), (vs, col, True),
+                        ("-" if ok is None else ("UYGUN" if ok else "UYGUN DEGIL"), col, ok is not None)]):
+                    row.add_widget(Label(text=txt, font_size=sp(11.5), bold=bold, color=cc, size_hint_x=COLW[i]))
+                table_card.add_widget(row)
+        table_card.bind(minimum_height=table_card.setter("height"))
+        self.content_area.add_widget(table_card)
+
+        export_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        pdf_btn = FlatButton(text="PDF Olarak Kaydet", bg_color=ACCENT, font_size=sp(13))
+        pdf_btn.bind(on_release=lambda b: self.export_pdf())
+        excel_btn = FlatButton(text="Excel Olarak Kaydet", bg_color=ACCENT, font_size=sp(13))
+        excel_btn.bind(on_release=lambda b: self.export_excel())
+        export_row.add_widget(pdf_btn)
+        export_row.add_widget(excel_btn)
+        self.content_area.add_widget(export_row)
+
+    def _export_excel_free(self):
+        data = self._compute_free_report_data()
+        if not data:
+            self._show_message_popup("Excel", "Once olcum girin, sonra rapor disa aktarilabilir.")
+            return
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Ozet"
+            bold = Font(bold=True)
+            hdr = PatternFill("solid", fgColor="E6E6E6")
+            ws.cell(row=1, column=1, value="AYDINLATMA OLCUM RAPORU - SERBEST OLCUM (standart yok)").font = Font(bold=True, size=14)
+            row = 3
+            proj = data["project_info"]
+            for label, key in [("Tesis", "name"), ("Ulke / Sehir", "location"),
+                                ("Olcum Tarihi", "date"), ("Hazirlayan", "prepared_by")]:
+                ws.cell(row=row, column=1, value=label).font = bold
+                ws.cell(row=row, column=2, value=proj.get(key, "") or "-")
+                row += 1
+            ws.cell(row=row, column=1, value="Izgara").font = bold
+            ws.cell(row=row, column=2, value=f"{data['rows_count']} x {data['cols_count']}  |  "
+                                             f"{data['measured_count']}/{data['total_points']} nokta")
+            row += 2
+            for j, h in enumerate(["Duzlem", "Ortalama", "Minimum", "Maksimum", "U1", "U2"], start=1):
+                c = ws.cell(row=row, column=j, value=h)
+                c.font = bold
+                c.fill = hdr
+            row += 1
+            names = {"Eh": "Yatay (Eh)", "Ev0": "Dikey 0", "Ev90": "Dikey 90", "Ev180": "Dikey 180", "Ev270": "Dikey 270"}
+            for title in data["probes"]:
+                m = data["metrics"].get(title)
+                if m is None:
+                    continue
+                for j, v in enumerate([names[title], round(m["avg"]), m["min"], m["max"],
+                                       round(m["u1"], 2), round(m["u2"], 2)], start=1):
+                    ws.cell(row=row, column=j, value=v)
+                row += 1
+            if data["has_targets"]:
+                row += 1
+                ws.cell(row=row, column=1, value="Girilen hedeflerle karsilastirma (kullanici hedefi)").font = bold
+                row += 1
+                for title in data["probes"]:
+                    for c in data["checks"].get(title, []):
+                        ws.cell(row=row, column=1, value=f"{names[title]} - {c['key']}")
+                        ws.cell(row=row, column=2, value=f">= {c['req']:g}")
+                        ws.cell(row=row, column=3, value=round(c["val"], 2))
+                        ws.cell(row=row, column=4, value="UYGUN" if c["ok"] else "UYGUN DEGIL")
+                        row += 1
+            ws.column_dimensions["A"].width = 28
+            ws2 = wb.create_sheet("Ham Veri")
+            for j, h in enumerate(["Grid No"] + data["probes"], start=1):
+                c = ws2.cell(row=1, column=j, value=h)
+                c.font = bold
+                c.fill = hdr
+            for rr, idx in enumerate(sorted(data["raw_measurements"].keys()), start=2):
+                vals = data["raw_measurements"][idx]["values"]
+                ws2.cell(row=rr, column=1, value=idx + 1)
+                for j, k in enumerate(data["probes"], start=2):
+                    ws2.cell(row=rr, column=j, value=vals.get(k))
+            fname = f"aydinlatma_serbest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            fpath = os.path.join(self._export_dir(), fname)
+            wb.save(fpath)
+            self._save_file_with_picker(
+                fpath, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Excel Kaydedildi")
+        except Exception as e:
+            self._show_message_popup("Excel Hatasi", f"Excel olusturulamadi:\n{type(e).__name__}: {e}")
+
     def _dataset_grid(self, raw_measurements, rows_n, cols_n, dataset_key):
         """Kontrol Panelindeki gorsel duzenle BIREBIR eslesen 2D veri gridi olusturur.
         Donen: grid[sutun_index][satir_index] = deger (sutun=0 en ustte, satir=0 en solda)."""
@@ -4909,6 +5324,9 @@ class ReportScreen(Screen):
 
         if ms.org == "FIBA":
             self._build_fiba_report_section(measured, total_points)
+            return
+        if ms.org == FREE_ORG:
+            self._build_free_report_section()
             return
 
         thresholds = STANDARDS[ms.org][ms.level]
