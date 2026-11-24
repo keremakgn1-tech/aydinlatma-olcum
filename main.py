@@ -779,6 +779,7 @@ class MeasureScreen(Screen):
             "cal_date": "",
             "colour_meter": "", "colour_meter_serial": "", "colour_meter_cal_date": "",
             "pitch_width": "", "pitch_length": "",
+            "inspection_time": "", "weather": "", "club_name": "",
             "flicker_avg": "", "flicker_max": "",
             "colour_temp_tc": "", "colour_rendering_ra": "", "glare_rating_rg": "",
             # --- Asagidakiler onceden SABIT (koddan degistirilmesi gereken) degerlerdi.
@@ -2988,6 +2989,9 @@ class ReportScreen(Screen):
             form.add_widget(val)
 
         section("GENEL")
+        field("Kulup Adi (UEFA icin)", "club_name")
+        field("Denetim Saati (orn. 20:30)", "inspection_time")
+        field("Hava Durumu (orn. Acik, 24 C)", "weather")
         field("Saha Genisligi (m)", "pitch_width")
         field("Saha Uzunlugu (m)", "pitch_length")
 
@@ -3130,7 +3134,7 @@ class ReportScreen(Screen):
                 f"Dosya kaydedildi:\n{filename}\n(bilgisayar/test ortaminda - "
                 "uygulamanin calisma klasorunde)")
 
-    def _export_pdf_fiba(self):
+    def _export_pdf_fiba_legacy(self):
         ms = self.measure_screen
         data = self._compute_fiba_report_data()
         if not data:
@@ -3557,10 +3561,39 @@ class ReportScreen(Screen):
             self._show_message_popup("PDF Hatasi", f"PDF olusturulurken bir sorun olustu:\n{e}")
 
     def export_pdf(self):
+        """Yeni kurumsal rapor (report_pdf.py). Herhangi bir sorunda ESKI rapora duser."""
         ms = self.measure_screen
-        if ms.org == "FIBA":
-            self._export_pdf_fiba()
+        fiba = ms.org == "FIBA"
+        data = self._compute_fiba_report_data() if fiba else self._compute_report_data()
+        if not data:
+            self._show_message_popup("PDF", "Once olcum girin, sonra rapor disa aktarilabilir.")
             return
+        try:
+            import report_pdf
+            lang = getattr(ms, "report_language", "tr")
+            base = os.path.dirname(os.path.abspath(__file__))
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"aydinlatma_raporu_{ts}.pdf"
+            fpath = os.path.join(self._export_dir(), fname)
+            if fiba:
+                report_pdf.build_fiba_pdf(data, lang, FIBA_STANDARDS, base, fpath)
+            else:
+                report_pdf.build_match_pdf(data, lang, STANDARDS, base, fpath)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._show_message_popup(
+                "Yeni rapor olusturulamadi",
+                f"Eski rapor bicimi kullanilacak.\n\nTeknik detay:\n{type(e).__name__}: {e}")
+            if fiba:
+                self._export_pdf_fiba_legacy()
+            else:
+                self._export_pdf_legacy()
+            return
+        self._save_file_with_picker(fpath, fname, "application/pdf", "PDF Kaydedildi" if lang == "tr" else "PDF Saved")
+
+    def _export_pdf_legacy(self):
+        ms = self.measure_screen
         data = self._compute_report_data()
         if not data:
             self._show_message_popup("PDF", "Once olcum girin, sonra rapor disa aktarilabilir.")
