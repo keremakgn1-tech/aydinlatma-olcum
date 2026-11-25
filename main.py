@@ -3342,18 +3342,58 @@ class ReportScreen(Screen):
 
     def _ingest_image_bytes(self, raw):
         """Galeriden gelen fotografi uygulama klasorune KUCULTEREK kaydeder
-        (EXIF yonu duzeltilir, en uzun kenar 1800 px, JPEG). Pillow yoksa ham kopya."""
+        (EXIF yonu duzeltilir, en uzun kenar 1800 px, JPEG). Cok yuksek cozunurluklu
+        (ornegin 200 MP) fotograflar da islenir. Okunamazsa ISTISNA firlatir -
+        bozuk/ham dosya ASLA kaydedilmez."""
         import io, time, random
         dest = os.path.join(self._photo_dir(), f"ph_{int(time.time() * 1000)}_{random.randint(100, 999)}.jpg")
+        err = None
         try:
             from PIL import Image, ImageOps
-            im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+            Image.MAX_IMAGE_PIXELS = None  # 200 MP telefon fotograflari "bomba" sayilmasin
+            im = Image.open(io.BytesIO(raw))
+            try:
+                im.draft("RGB", (2400, 2400))  # JPEG'i kucuk olcekte coz: hizli ve az bellek
+            except Exception:
+                pass
+            im = ImageOps.exif_transpose(im).convert("RGB")
             im.thumbnail((1800, 1800))
             im.save(dest, "JPEG", quality=85)
-        except Exception:
-            with open(dest, "wb") as f:
-                f.write(raw)
-        return dest
+            return dest
+        except Exception as e:
+            err = e
+        # Pillow acamadi (ornegin HEIC): Android'in kendi cozucusunu dene
+        try:
+            from jnius import autoclass
+            BitmapFactory = autoclass("android.graphics.BitmapFactory")
+            Options = autoclass("android.graphics.BitmapFactory$Options")
+            CF = autoclass("android.graphics.Bitmap$CompressFormat")
+            FileOutputStream = autoclass("java.io.FileOutputStream")
+            o1 = Options(); o1.inJustDecodeBounds = True
+            BitmapFactory.decodeByteArray(raw, 0, len(raw), o1)
+            ss = 1
+            while max(o1.outWidth, o1.outHeight) / ss > 3600:
+                ss *= 2
+            o2 = Options(); o2.inSampleSize = ss
+            bmp = BitmapFactory.decodeByteArray(raw, 0, len(raw), o2)
+            if bmp is None:
+                raise ValueError("format desteklenmiyor")
+            fos = FileOutputStream(dest)
+            bmp.compress(CF.JPEG, 85, fos)
+            fos.close(); bmp.recycle()
+            try:  # bu yoldan gelen buyuk dosyayi da kucult
+                from PIL import Image
+                im = Image.open(dest).convert("RGB"); im.thumbnail((1800, 1800)); im.save(dest, "JPEG", quality=85)
+            except Exception:
+                pass
+            return dest
+        except Exception as e2:
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except Exception:
+                pass
+            raise RuntimeError(f"{type(err).__name__ if err else ''}: {err} / {type(e2).__name__}: {e2}")
 
     def _pick_images(self, multiple, on_paths):
         """Galeriden (Android sistem secicisi) fotograf secer; on_paths(liste) ana is
@@ -3378,13 +3418,18 @@ class ReportScreen(Screen):
                     return f.read()
 
             def work(uris):
-                paths = []
+                paths = []; fails = []
                 for uri in uris:
                     try:
                         paths.append(self._ingest_image_bytes(read_uri(uri)))
-                    except Exception:
-                        pass
-                Clock.schedule_once(lambda dt: on_paths(paths), 0)
+                    except Exception as e:
+                        fails.append(str(e))
+
+                def finish(dt):
+                    on_paths(paths)
+                    if fails:
+                        self._show_message_popup("Fotograf", f"{len(fails)} fotograf okunamadi ve eklenmedi.\n{fails[0][:160]}")
+                Clock.schedule_once(finish, 0)
 
             def on_activity_result(request_code, result_code, intent):
                 if request_code != REQUEST_CODE:
@@ -3428,15 +3473,17 @@ class ReportScreen(Screen):
                        background_color=(0, 0, 0, 0), background='', separator_height=0, title_size=0)
 
         def ok(*a):
-            paths = []
+            paths = []; fails = []
             for fp in chooser.selection:
                 try:
                     with open(fp, "rb") as f:
                         paths.append(self._ingest_image_bytes(f.read()))
-                except Exception:
-                    pass
+                except Exception as e:
+                    fails.append(str(e))
             popup.dismiss()
             on_paths(paths)
+            if fails:
+                self._show_message_popup("Fotograf", f"{len(fails)} fotograf okunamadi ve eklenmedi.\n{fails[0][:160]}")
         cancel = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(13))
         cancel.bind(on_release=lambda b: popup.dismiss())
         sel = FlatButton(text="Sec", bg_color=SUCCESS, font_size=sp(13), bold=True)
@@ -4160,7 +4207,7 @@ class ReportScreen(Screen):
                            ((len(ms.report_photos.get("face", [])) + len(ms.report_photos.get("shadow", []))) if std_ else 0)
                     got = (1 if cp["cover"] else 0) + len(cp["final"]) + ((len(cp["face"]) + len(cp["shadow"])) if std_ else 0)
                     if got < want:
-                        self._show_message_popup("Fotograflar", f"{want - got} fotograf okunamadigi icin rapora eklenemedi.")
+                        self._show_message_popup("Fotograflar", f"{want - got} fotograf okunamadigi icin rapora eklenemedi. Rapor Fotograflari ekranindan bu fotograflari silip galeriden tekrar secin.")
                 except Exception:
                     pass
             try:
