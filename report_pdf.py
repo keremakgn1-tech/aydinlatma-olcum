@@ -63,8 +63,8 @@ I = {
     "cct": ("Renk sıcaklığı (Tc)", "Colour temperature (Tc)"), "ra": ("Renk geriverimi (Ra)", "Colour rendering (Ra)"),
     "rg": ("Kamaşma (RG)", "Glare rating (RG)"), "mf": ("Bakım faktörü (MF)", "Maintenance factor (MF)"),
     "sum_title": ("Sonuç Özeti", "Summary of Results"),
-    "sum_sub": ("{date}  ·  {n}/{t} nokta  ·  değerler ölçüldüğü gibidir (bakım faktörü uygulanmamıştır)",
-                "{date}  ·  {n}/{t} points  ·  values as measured (no maintenance factor applied)"),
+    "sum_sub": ("{date}  ·  {n}/{t} nokta  ·  değerler ölçüldüğü gibidir",
+                "{date}  ·  {n}/{t} points  ·  values as measured"),
     "complies": ("KRİTERLERİ KARŞILIYOR", "COMPLIES"), "not_complies": ("KRİTERLERİ KARŞILAMIYOR", "DOES NOT COMPLY"),
     "maur_line": ("MAUR hataları (tüm düzlemler): {f}  ·  izin verilen: {m}", "MAUR failures (all planes): {f}  ·  allowed: {m}"),
     "maur_na": ("MAUR bu standartta belirtilmemiştir", "MAUR is not specified for this standard"),
@@ -161,6 +161,20 @@ EN_VALUES = {
     "> 0.50   (en fazla 30 hata)": "> 0.50   (max 30 failures)", "> 0.60   (en fazla 10 hata)": "> 0.60   (max 10 failures)",
     "> 0.60   (en fazla 20 hata)": "> 0.60   (max 20 failures)", "> 0.60   (en fazla 30 hata)": "> 0.60   (max 30 failures)",
 }
+TR_VALUES = {
+    "Eh ort > 1000 lx (3 dk) / > 1250 lx (15 dk)": "Eh ort. > 1000 lx (3 dk) / > 1250 lx (15 dk)",
+    "Eh ort > 2000 lx, 15 dakika icinde": "Eh ort. > 2000 lx, 15 dakika içinde",
+    "FIFA tarafindan duruma gore belirlenir": "FIFA tarafından duruma göre belirlenir",
+    "Gecerli degil (antrenman sahasi)": "Geçerli değil (antrenman sahası)",
+    "Guc kesintisinden sonra 15 dakika icinde": "Güç kesintisinden sonra 15 dakika içinde",
+    "Isik surekliligine kesinti verilemez": "Işık sürekliliğine kesinti verilemez",
+    "LED: kesinti yok. HID: FPSL A'ya bakiniz": "LED: kesinti yok. HID: FPSL A'ya bakınız",
+    "belirtilmemis": "belirtilmemiş", "belirtilmemis (MAUR bu standartta yok)": "belirtilmemiş (bu standartta MAUR yok)",
+    "ort < 1%   maks < 1%": "ort. < %1   maks. < %1", "ort < 12%   maks < 15%": "ort. < %12   maks. < %15",
+    "ort < 20%   maks < 30%": "ort. < %20   maks. < %30", "ort < 3%   maks < 3%": "ort. < %3   maks. < %3", "< %1": "< %1",
+    "> 0.50   (en fazla 30 hata)": "> 0,50   (en fazla 30 hata)", "> 0.60   (en fazla 10 hata)": "> 0,60   (en fazla 10 hata)",
+    "> 0.60   (en fazla 20 hata)": "> 0,60   (en fazla 20 hata)", "> 0.60   (en fazla 30 hata)": "> 0,60   (en fazla 30 hata)",
+}
 EN_PLANE_LABEL = {"Yatay (Eh)": "Horizontal (Eh)", "Dikey 0°": "Vertical 0°", "Dikey 90°": "Vertical 90°",
                   "Dikey 180°": "Vertical 180°", "Dikey 270°": "Vertical 270°"}
 EN_CRIT = {"Ortalama >": "Average >", "Minimum >": "Minimum >", "Uniformity U1": "Uniformity U1", "Uniformity U2": "Uniformity U2"}
@@ -177,7 +191,7 @@ def make_translator(lang):
         return s.replace(".", ",") if lang == "tr" else s
     def val(s):  # standartlardaki sabit metin
         s = str(s)
-        return EN_VALUES.get(s, s) if lang == "en" else s
+        return EN_VALUES.get(s, s) if lang == "en" else TR_VALUES.get(s, s)
     return t, num, val
 
 
@@ -194,7 +208,8 @@ class Rep(FPDF):
         except Exception:
             self.add_font("D", "", os.path.join(fd, "DejaVuSans.ttf")); self.add_font("D", "B", os.path.join(fd, "DejaVuSans-Bold.ttf"))
             self.fam = {"": ("D", ""), "L": ("D", ""), "M": ("D", "B"), "B": ("D", "B")}
-        self.logo = os.path.join(assets_dir, "report_logo.png")
+        self.logo = os.path.join(assets_dir, "report_logo.svg")            # tam logo (kapak)
+        self.logo_head = os.path.join(assets_dir, "report_logo_head.svg")  # alt yazisiz (sayfa ustleri)
 
     def f(self, style="", size=9, color=INK):
         fam, st = self.fam[style]; self.set_font(fam, st, size); self.set_text_color(*color)
@@ -221,16 +236,18 @@ class Rep(FPDF):
     def pill(self, x, y, w, h, s, ok=True, size=5.5):
         self.rr(x, y, w, h, h / 2, OK_BG if ok else BAD_BG); self.txt(x, y, w, h, s, "B", size, OK_TX if ok else BAD_TX, "C")
 
-    def logo_img(self, x, y, w):
+    def logo_img(self, x, y, w, head=False):
+        """Vektor (SVG) logo: telefonda Pillow olmadigi icin PNG basilamiyordu."""
         try:
-            if os.path.exists(self.logo): self.image(self.logo, x, y, w)
+            path = self.logo_head if head else self.logo
+            if os.path.exists(path): self.image(path, x, y, w)
         except Exception:
             pass
 
     def newpage(self, title, sub="", cover=False):
         self.add_page(); self.cover = cover
         if cover: return
-        self.logo_img(LX, 8, 20)
+        self.logo_img(LX, 7.5, 19, head=True)
         self.txt(60, 9, RX - 60, 6, (self.t("rep_title") + "  ·  " + self.venue), "", 6.5, GRAY, "R")
         self.hline(24); self.rr(LX, 30, 1.8, 9.5, .9, YEL)
         self.txt(LX + 4.5, 29.3, 170, 7, title, "B", 15)
@@ -350,7 +367,7 @@ def _num(s):
 
 def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fiba=False, plain=False):
     p.newpage("", cover=True)
-    p.logo_img(LX, 16, 48)
+    p.logo_img(RX - 52, 14, 52)
     p.txt(LX, 92, 170, 5, kind_title, "M", 8.5, GRAY)
     p.set_xy(LX, 99); p.f("B", 26); p.multi_cell(170, 11, name or "-")
     ytag = max(p.get_y() + 3, 124)
@@ -383,7 +400,7 @@ def cover_sheet(p, t, proj, fi, std_name, grid_txt, fiba=False, areas_txt="", cl
     g.append((t("weather"), fi.get("weather")))
     y1 = kv_card(p, LX, 46, 87, t("general"), g)
     ins = [(t("org"), fi.get("org_name")), (t("addr"), fi.get("org_address")), (t("phone"), fi.get("org_phone_email")),
-           (t("insp_by"), fi.get("inspector_name")), (t("signature"), ""), (t("std"), std_name), (t("method"), t("method_v"))]
+           (t("insp_by"), fi.get("inspector_name")), (t("signature"), ""), (t("std"), std_name)]
     y2 = kv_card(p, LX + 91, 46, 87, t("inspection"), ins)
     y = max(y1, y2) + 6
     p.txt(LX, y, 100, 5, t("equipment"), "B", 9); y += 7
@@ -478,7 +495,7 @@ def build_match_pdf(data, lang, standards, assets_dir, out_path):
         rows = [(t("min_ratio"), f"> {num(mr)}"), (t("max_fail"), str(th.get("maur_max_fail")))] if mr is not None else [(t("maur_card"), val(th.get("maur", "")))]
         yy = kv_card(p, x, y, 87, t("maur_card"), rows, 7); y = max(yy, ymax) + 5
     rows = [(t("mcm"), val(th.get("mcm", ""))), (t("ff"), val(th.get("ff", ""))), (t("cct"), val(th.get("cct", ""))),
-            (t("ra"), f">= {th.get('ra')} Ra"), (t("rg"), val(th.get("rg", ""))), (t("mf"), val(th.get("mf", "")))]
+            (t("ra"), f">= {th.get('ra')} Ra"), (t("rg"), val(th.get("rg", "")))]
     y = kv_card(p, LX, y, CW, t("other_req"), rows, 6.8)
     p.txt(LX, y + 3, CW, 8, t("other_note"), "", 6.8, GRAY)
 
@@ -514,10 +531,6 @@ def build_match_pdf(data, lang, standards, assets_dir, out_path):
     p.newpage(t("grid_title"), t("grid_sub"))
     x0, y0, PW, PH = grid_diagram(p, t, R, C, seq, L, W)
     p.txt(x0, y0 + PH + 16, PW, 4, t("spacing", L=f"{L:g}", a=R - 1, sa=f"{L / max(R - 1, 1):.3f}".rstrip("0").rstrip("."), W=f"{W:g}", b=C - 1, sb=f"{W / max(C - 1, 1):.3f}".rstrip("0").rstrip(".")), "", 7, GRAY, "C")
-    lr, lc = seq[-1]; endpos = t("pos_bl") if lr == 0 else t("pos_br")
-    yy = y0 + PH + 28
-    for i, (a, b) in enumerate(((t("start"), t("start_v")), (t("order"), t("order_v")), (t("end"), t("end_v", n=len(seq), pos=endpos)))):
-        x = LX + i * 60; p.txt(x, yy, 55, 4, a, "M", 6.5, GRAY); p.txt(x, yy + 4.5, 58, 5, b, "", 7)
 
     # --- ham veri
     rows_all = [(i + 1, meas[i]["values"]) for i in range(len(seq)) if i in meas]
@@ -743,9 +756,6 @@ def build_free_pdf(data, lang, assets_dir, out_path):
     if Ld and Wd:
         p.txt(x0, yy, PW, 4, t("spacing", L=f"{Ld:g}", a=R - 1, sa=f"{Ld / max(R - 1, 1):.3f}".rstrip("0").rstrip("."), W=f"{Wd:g}", b=C - 1, sb=f"{Wd / max(C - 1, 1):.3f}".rstrip("0").rstrip(".")), "", 7, GRAY, "C"); yy += 12
     else: yy += 4
-    lr, lc = seq[-1]; endpos = t("pos_bl") if lr == 0 else t("pos_br")
-    for i, (a, b) in enumerate(((t("start"), t("start_v")), (t("order"), t("order_v")), (t("end"), t("end_v", n=len(seq), pos=endpos)))):
-        x = LX + i * 60; p.txt(x, yy, 55, 4, a, "M", 6.5, GRAY); p.txt(x, yy + 4.5, 58, 5, b, "", 7)
 
     # --- ham veri (yalnizca secilen problar)
     rows_all = [(i + 1, meas[i]["values"]) for i in range(len(seq)) if i in meas]

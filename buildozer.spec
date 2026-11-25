@@ -4,7 +4,7 @@ package.name = aydinlatmaolcum
 package.domain = org.kerem
 
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_exts = py,png,jpg,kv,atlas,ttf,svg
 
 version = 1.0
 
