@@ -109,6 +109,14 @@ I = {
     "notes_title": ("Onay", "Approval"), "notes": ("Notlar", "Notes"),
     "appr_text": ("Bu rapor, belirtilen standart ve ölçüm koşulları kapsamında, sahada alınan ölçümlere dayanılarak hazırlanmıştır.",
                   "This report has been prepared from on-site measurements, within the scope of the stated standard and measurement conditions."),
+    "ph_ref": ("Standart referans görselleri", "Standard reference figures"),
+    "ph_site": ("Saha fotoğrafları", "Site photographs"),
+    "ph_fig_bad": ("Şekil 1 · Kötü yüz modelleme örneği", "Figure 1 · Example of poor face modelling"),
+    "ph_fig_good": ("Şekil 2 · İyi yüz modelleme örneği", "Figure 2 · Example of good face modelling"),
+    "ph_fig_hard": ("Sert gölge örneği", "Example of hard shadows"),
+    "ph_fig_soft": ("Yumuşak gölge örneği (birden çok yönden ışık)", "Example of soft shadows (multiple light sources)"),
+    "ph_fig_goal": ("Kale önünde sert gölge örneği", "Example of hard shadows in the goal area"),
+    "ph_fig_src": ("Referans görseller", "Reference figures"),
     "ph_face_title": ("Oyuncu Yüz Modellemesi", "Player Face Modelling"),
     "ph_face_sub": ("Işığın geliş açısı ve oyuncu yüzlerindeki gölgelenmenin değerlendirilmesi",
                     "Assessment of the light incidence angle and shading on player faces"),
@@ -499,55 +507,94 @@ def _need_h(path, cell_w, cap=6):
     return (cell_w - 4) / _aspect(path) + 4 + cap
 
 
+def _ref_img(p, name, org):
+    path = os.path.join(p.assets, "report_ref", f"{name}_{org.lower()}.jpg")
+    return path if (_pil() and os.path.exists(path)) else None
+
+
+def _draw_ref(p, path, x, y, w, h):
+    """Referans gorselini (w x h) kutuya siktirir; cizilen yuksekligi dondurur."""
+    try:
+        buf, dw, dh = _prep_image(path, w, h, False)
+        p.image(buf, x + (w - dw) / 2, y, dw, dh)
+        p.set_draw_color(*LINE); p.set_line_width(.2); p.rect(x + (w - dw) / 2, y, dw, dh)
+        return dh
+    except Exception:
+        return 0
+
+
 def obs_page(p, t, org, kind, ph):
     """Oyuncu Yuz Modellemesi / Oyuncu Golgeleri sayfasi (FIFA / UEFA)."""
     face = kind == "face"
     photos = ph["face" if face else "shadow"][:2]
     if not photos: return
     p.newpage(t("ph_face_title" if face else "ph_shadow_title"), t("ph_face_sub" if face else "ph_shadow_sub"))
-    # standart gereksinimi karti
     idx = 0 if t("rep_title").startswith("AYD") else 1
     guide = [g[idx] for g in (FACE_GUIDE if face else SHADOW_GUIDE)]
+    refs = []
+    if face:
+        r = _ref_img(p, "face", org)
+        if r: refs = [(r, None)]
+    else:
+        for nm, key in (("hard", "ph_fig_hard"), ("soft", "ph_fig_soft"), ("goal", "ph_fig_goal")):
+            r = _ref_img(p, nm, org)
+            if r: refs.append((r, key))
+    side_fig = face and bool(refs)                      # yuz: gorsel kartin sagina
+    tw = (CW - 16 - 66) if side_fig else (CW - 16)      # metin genisligi
     p.f("", 7.2, INK); lines_all = []
     for g in guide:
-        try: ls = p.multi_cell(CW - 20, 3.7, g, dry_run=True, output="LINES")
+        try: ls = p.multi_cell(tw - 4, 3.7, g, dry_run=True, output="LINES")
         except Exception: ls = [g]
         lines_all.append(ls)
-    hh = 14 + sum(len(ls) * 3.7 + 1.8 for ls in lines_all) + 6
-    p.rr(LX, 46, CW, hh, 3, CARD)
-    p.rr(LX, 46, 1.6, hh, .8, YEL)
+    text_h = sum(len(ls) * 3.7 + 1.8 for ls in lines_all)
+    fig_w = 60; fig_h = 0
+    if side_fig:
+        asp = _aspect(refs[0][0]); fig_h = fig_w / asp
+    hh = max(14 + text_h + 6, (14 + fig_h + 14) if side_fig else 0)
+    p.rr(LX, 46, CW, hh, 3, CARD); p.rr(LX, 46, 1.6, hh, .8, YEL)
     p.txt(LX + 6, 49, 100, 5, t("ph_req"), "B", 8.5)
     yy = 56.5
     for ls in lines_all:
         p.set_fill_color(*BRAND); p.ellipse(LX + 6.2, yy + 1.3, 1.2, 1.2, "F")
-        p.f("", 7.2, INK); p.set_xy(LX + 10, yy); p.multi_cell(CW - 16, 3.7, "\n".join(ls))
+        p.f("", 7.2, INK); p.set_xy(LX + 10, yy); p.multi_cell(tw, 3.7, "\n".join(ls))
         yy += len(ls) * 3.7 + 1.8
     p.txt(LX + 6, 46 + hh - 5.2, CW - 12, 4, t("ph_src") + ": " + SRC.get(org, org), "", 6.3, GRAY)
-    # fotograflar
+    if side_fig:
+        fx = RX - fig_w - 5
+        dh = _draw_ref(p, refs[0][0], fx, 53, fig_w, fig_w)
+        p.txt(fx, 53 + dh + 1.2, fig_w, 3.2, t("ph_fig_bad"), "", 5.8, GRAY)
+        p.txt(fx, 53 + dh + 4.6, fig_w, 3.2, t("ph_fig_good"), "", 5.8, GRAY)
     y = 46 + hh + 6
-    ph_h = max(62, min(112, max(_need_h(pp, 87) for pp in photos)))
-    x_start = LX if len(photos) == 2 else LX + (CW - 87) / 2
-    for i, path in enumerate(photos):
-        x = x_start + i * 91
-        photo_cell(p, path, x, y, 87, ph_h, caption=f"{t('ph_photo')} {i + 1}")
-    y += ph_h + 6
-    # degerlendirme
+    if (not face) and refs:
+        p.txt(LX, y, 100, 4, t("ph_ref"), "B", 8); y += 5.5
+        cw_ = (CW - 8) / 3; mh = 0
+        for i, (rp_, key) in enumerate(refs):
+            x = LX + i * (cw_ + 4); dh = _draw_ref(p, rp_, x, y, cw_, 32); mh = max(mh, dh)
+            p.txt(x, y + dh + 1, cw_, 3.2, t(key), "", 5.6, GRAY)
+        y += mh + 8
+    # degerlendirme kartinin boyutu (fotograflara kalan alani hesaplamak icin)
     rating = ph["face_rating" if face else "shadow_rating"]; note = ph["face_note" if face else "shadow_note"]
-    if rating in ("good", "fair", "poor") or note:
-        ey = y
-        sent = ""
-        if rating in ("good", "fair", "poor"):
-            sent = t(("ph_face_" if face else "ph_sh_") + rating)
-        p.f("", 7.5, INK); body = []
+    has_obs = rating in ("good", "fair", "poor") or bool(note)
+    body = []; nl = []; eh = 0
+    if has_obs:
+        sent = t(("ph_face_" if face else "ph_sh_") + rating) if rating in ("good", "fair", "poor") else ""
+        p.f("", 7.5, INK)
         if sent:
-            try: body += p.multi_cell(CW - 12, 4, sent, dry_run=True, output="LINES")
-            except Exception: body += [sent]
-        nl = []
+            try: body = p.multi_cell(CW - 12, 4, sent, dry_run=True, output="LINES")
+            except Exception: body = [sent]
         if note:
             try: nl = p.multi_cell(CW - 12, 4, t("ph_note") + ": " + note, dry_run=True, output="LINES")[:4]
             except Exception: nl = [note]
         eh = 13 + len(body) * 4 + (len(nl) * 4 + 2 if nl else 0) + 6
-        eh = min(eh, 284 - 4 - ey)
+    p.txt(LX, y, 100, 4, t("ph_site"), "B", 8); y += 5.5
+    avail = 280 - y - (eh + 6 if has_obs else 0)
+    ph_h = max(62, min(112, avail, max(_need_h(pp, 87) for pp in photos)))
+    x_start = LX if len(photos) == 2 else LX + (CW - 87) / 2
+    for i, path in enumerate(photos):
+        photo_cell(p, path, x_start + i * 91, y, 87, ph_h, caption=f"{t('ph_photo')} {i + 1}")
+    y += ph_h + 6
+    if has_obs:
+        ey = y; eh = min(eh, 284 - 4 - ey)
         p.rr(LX, ey, CW, eh, 3, (255, 255, 255), LINE)
         p.txt(LX + 6, ey + 3, 60, 5, t("ph_obs"), "B", 8.5)
         if rating in ("good", "fair", "poor"):
