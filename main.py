@@ -314,6 +314,49 @@ INSPECTOR_NAME = "Kerem AKGÜN"
 # ---------------------------------------------------------
 # ORTAK GORSEL BILESENLER
 # ---------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Rapor fotograflari (kapak / yuz modelleme / golgeler / tamamlanmis kurulum)
+# ----------------------------------------------------------------------------
+PHOTO_LIMITS = {"face": 2, "shadow": 2, "final": 16}
+
+
+def new_report_photos():
+    return {"cover": "", "face": [], "shadow": [], "final": [],
+            "face_rating": "", "face_note": "", "shadow_rating": "", "shadow_note": ""}
+
+
+def sanitize_report_photos(raw):
+    """Oturumdan/yedekten gelen fotograf kaydini temizler: olmayan dosyalar atilir."""
+    out = new_report_photos()
+    if not isinstance(raw, dict):
+        return out
+    try:
+        if raw.get("cover") and os.path.exists(raw["cover"]):
+            out["cover"] = raw["cover"]
+        for k, lim in PHOTO_LIMITS.items():
+            out[k] = [p for p in (raw.get(k) or []) if isinstance(p, str) and os.path.exists(p)][:lim]
+        for k in ("face_rating", "shadow_rating"):
+            out[k] = raw.get(k) if raw.get(k) in ("good", "fair", "poor") else ""
+        for k in ("face_note", "shadow_note"):
+            out[k] = str(raw.get(k) or "")
+    except Exception:
+        return new_report_photos()
+    return out
+
+
+def delete_report_photo_files(rp):
+    try:
+        paths = [rp.get("cover")] + list(rp.get("face", [])) + list(rp.get("shadow", [])) + list(rp.get("final", []))
+        for p in paths:
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 class PopupContent(BoxLayout):
     """Popup icerigi icin KENDI cizdigimiz temaya-uyumlu arka plan.
     Kivy'nin yerlesik Popup.background_color'i guvenilir calismadigi
@@ -813,6 +856,7 @@ class MeasureScreen(Screen):
         self.report_language = "tr"  # "tr" veya "en" - PDF raporunun dili
         self.free_probes = ["Eh"]  # Serbest olcum: hangi problar olculuyor / raporda yer alir
         self.free_targets = {}  # Serbest olcum: ISTEGE BAGLI hedefler (bos = karsilastirma yok)
+        self.report_photos = new_report_photos()  # rapora eklenecek fotograflar (galeriden)
         self.fiba_ppa_margin = 1  # TPA sinirindan PPA'ya kac "halka" ic - varsayilan 1
         self.ec_values = {}  # idx -> deger: FIBA "EC" (270 probu kameraya cevrilerek, IKINCI Pi olcumu)
         self.fiba_round = 1  # FIBA: 1=dikey+EC turu, 2=yatay (Eh) turu
@@ -855,6 +899,7 @@ class MeasureScreen(Screen):
             "report_language": self.report_language,
             "free_probes": self.free_probes,
             "free_targets": self.free_targets,
+            "report_photos": self.report_photos,
             "fiba_ppa_margin": self.fiba_ppa_margin,
             "ec_values": {str(k): v for k, v in self.ec_values.items()},
             "fiba_round": self.fiba_round,
@@ -901,6 +946,8 @@ class MeasureScreen(Screen):
         self.report_language = data.get("report_language", self.report_language)
         self.free_probes = data.get("free_probes", self.free_probes) or ["Eh"]
         self.free_targets = data.get("free_targets", self.free_targets) or {}
+        if "report_photos" in data:
+            self.report_photos = sanitize_report_photos(data.get("report_photos"))
         self.fiba_ppa_margin = data.get("fiba_ppa_margin", self.fiba_ppa_margin)
         raw_ec = data.get("ec_values", {})
         self.ec_values = {int(k): v for k, v in raw_ec.items()} if raw_ec else {}
@@ -1323,6 +1370,8 @@ class MeasureScreen(Screen):
         self.measurements = {}
         self.ec_values = {}
         self.free_targets = {}
+        delete_report_photo_files(self.report_photos)
+        self.report_photos = new_report_photos()
         self.frontier_index = 0
         self.current_index = 0
         self.fiba_round = 1
@@ -3280,6 +3329,305 @@ class ReportScreen(Screen):
 
         popup.open()
 
+    # ------------------------------------------------------------------
+    # Rapor fotograflari
+    # ------------------------------------------------------------------
+    def _photo_dir(self):
+        d = os.path.join(self._export_dir(), "report_photos")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+        return d
+
+    def _ingest_image_bytes(self, raw):
+        """Galeriden gelen fotografi uygulama klasorune KUCULTEREK kaydeder
+        (EXIF yonu duzeltilir, en uzun kenar 1800 px, JPEG). Pillow yoksa ham kopya."""
+        import io, time, random
+        dest = os.path.join(self._photo_dir(), f"ph_{int(time.time() * 1000)}_{random.randint(100, 999)}.jpg")
+        try:
+            from PIL import Image, ImageOps
+            im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+            im.thumbnail((1800, 1800))
+            im.save(dest, "JPEG", quality=85)
+        except Exception:
+            with open(dest, "wb") as f:
+                f.write(raw)
+        return dest
+
+    def _pick_images(self, multiple, on_paths):
+        """Galeriden (Android sistem secicisi) fotograf secer; on_paths(liste) ana is
+        parcaciginda cagrilir. Android disinda basit bir dosya secici acilir."""
+        try:
+            from jnius import autoclass
+            from android import activity as android_activity
+        except Exception:
+            self._desktop_image_chooser(multiple, on_paths)
+            return
+        try:
+            Intent = autoclass("android.content.Intent")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            REQUEST_CODE = 4244
+
+            def read_uri(uri):
+                resolver = activity.getContentResolver()
+                pfd = resolver.openFileDescriptor(uri, "r")
+                fd = pfd.detachFd()
+                with os.fdopen(fd, "rb") as f:
+                    return f.read()
+
+            def work(uris):
+                paths = []
+                for uri in uris:
+                    try:
+                        paths.append(self._ingest_image_bytes(read_uri(uri)))
+                    except Exception:
+                        pass
+                Clock.schedule_once(lambda dt: on_paths(paths), 0)
+
+            def on_activity_result(request_code, result_code, intent):
+                if request_code != REQUEST_CODE:
+                    return
+                try:
+                    if intent is None:
+                        return
+                    uris = []
+                    clip = intent.getClipData()
+                    if clip is not None:
+                        for i in range(clip.getItemCount()):
+                            uris.append(clip.getItemAt(i).getUri())
+                    elif intent.getData() is not None:
+                        uris.append(intent.getData())
+                    if uris:
+                        threading.Thread(target=work, args=(uris,), daemon=True).start()
+                except Exception as e:
+                    Clock.schedule_once(lambda dt, e=e: self._show_message_popup(
+                        "Fotograf Hatasi", f"Fotograf alinamadi:\n{e}"), 0)
+                finally:
+                    android_activity.unbind(on_activity_result=on_activity_result)
+
+            android_activity.bind(on_activity_result=on_activity_result)
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("image/*")
+            if multiple:
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
+            activity.startActivityForResult(intent, REQUEST_CODE)
+        except Exception as e:
+            self._show_message_popup("Fotograf Hatasi", f"Galeri acilamadi:\n{e}")
+
+    def _desktop_image_chooser(self, multiple, on_paths):
+        from kivy.uix.filechooser import FileChooserListView
+        content = PopupContent(padding=dp(12), spacing=dp(8))
+        chooser = FileChooserListView(path=os.path.expanduser("~"), multiselect=bool(multiple),
+                                       filters=["*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG"])
+        content.add_widget(chooser)
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="", content=content, size_hint=(0.92, 0.9), auto_dismiss=False,
+                       background_color=(0, 0, 0, 0), background='', separator_height=0, title_size=0)
+
+        def ok(*a):
+            paths = []
+            for fp in chooser.selection:
+                try:
+                    with open(fp, "rb") as f:
+                        paths.append(self._ingest_image_bytes(f.read()))
+                except Exception:
+                    pass
+            popup.dismiss()
+            on_paths(paths)
+        cancel = FlatButton(text="Vazgec", bg_color=CARD_LIGHT, font_size=sp(13))
+        cancel.bind(on_release=lambda b: popup.dismiss())
+        sel = FlatButton(text="Sec", bg_color=SUCCESS, font_size=sp(13), bold=True)
+        sel.bind(on_release=ok)
+        row.add_widget(cancel); row.add_widget(sel)
+        content.add_widget(row)
+        popup.open()
+
+    def _open_photos_popup(self):
+        ms = self.measure_screen
+        rp = ms.report_photos
+        std = ms.org in ("FIFA", "UEFA")
+        content = PopupContent(padding=dp(16), spacing=dp(10))
+        content.add_widget(Label(text="Rapor Fotograflari", font_size=sp(17), bold=True, color=TEXT,
+                                  size_hint_y=None, height=dp(28)))
+        scroll = ScrollView(size_hint=(1, 1))
+        form = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10),
+                          padding=[0, dp(4), 0, dp(4)])
+        form.bind(minimum_height=form.setter("height"))
+        scroll.add_widget(form)
+        content.add_widget(scroll)
+        self._focused_popup_field = None
+        notes = {}
+
+        def commit_notes():
+            for k, ti in notes.items():
+                rp[k] = ti.text.strip()
+
+        def label(text, color=TEXT_MUTED, size=12, bold=False, h=None):
+            lbl = Label(text=text, font_size=sp(size), color=color, bold=bold, size_hint_y=None,
+                        halign="left", valign="middle")
+            lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
+            lbl.bind(texture_size=lambda i, ts: setattr(i, "height", (h or ts[1]) + dp(4)))
+            return lbl
+
+        def thumb(path, on_remove):
+            fl = FloatLayout(size_hint=(None, None), size=(dp(92), dp(92)))
+            fl.add_widget(Image(source=path, allow_stretch=True, keep_ratio=True,
+                                 size_hint=(1, 1), pos_hint={"x": 0, "y": 0}))
+            rm = FlatButton(text="X", bg_color=DANGER, font_size=sp(12), bold=True,
+                             size_hint=(None, None), size=(dp(26), dp(26)), pos_hint={"right": 1, "top": 1})
+            rm.bind(on_release=lambda b: on_remove())
+            fl.add_widget(rm)
+            return fl
+
+        def thumbs_grid(paths, remover):
+            g = GridLayout(cols=3, size_hint_y=None, spacing=dp(6), row_default_height=dp(92),
+                            row_force_default=True)
+            g.bind(minimum_height=g.setter("height"))
+            for p in paths:
+                g.add_widget(thumb(p, lambda p=p: remover(p)))
+            return g
+
+        def add_btn(text, cb, color=ACCENT):
+            b = FlatButton(text=text, bg_color=color, font_size=sp(13), bold=True,
+                            size_hint_y=None, height=dp(42))
+            b.bind(on_release=lambda x: cb())
+            return b
+
+        def pick_into(key, multiple):
+            commit_notes()
+            lim = PHOTO_LIMITS.get(key, 1)
+
+            def got(paths):
+                if key == "cover":
+                    if paths:
+                        old = rp["cover"]
+                        rp["cover"] = paths[0]
+                        if old and old != paths[0] and os.path.exists(old):
+                            try: os.remove(old)
+                            except Exception: pass
+                else:
+                    room = lim - len(rp[key])
+                    rp[key] += paths[:max(room, 0)]
+                    for extra in paths[max(room, 0):]:
+                        try: os.remove(extra)
+                        except Exception: pass
+                    if len(paths) > room:
+                        self._show_message_popup("Fotograf", f"En fazla {lim} fotograf eklenebilir.")
+                ms.save_session()
+                render()
+            self._pick_images(multiple, got)
+
+        def remove_from(key, path):
+            commit_notes()
+            try:
+                if key == "cover":
+                    rp["cover"] = ""
+                else:
+                    rp[key] = [p for p in rp[key] if p != path]
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+            ms.save_session()
+            render()
+
+        def rating_row(key):
+            row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+            cur = rp.get(key + "_rating", "")
+            for val, text, col in (("good", "Iyi", SUCCESS), ("fair", "Kabul edilebilir", (0.78, 0.60, 0.12, 1)),
+                                    ("poor", "Yetersiz", DANGER)):
+                b = FlatButton(text=text, bg_color=(col if cur == val else CARD_LIGHT),
+                                font_size=sp(12), bold=(cur == val))
+                def tap(x, val=val):
+                    commit_notes()
+                    rp[key + "_rating"] = "" if rp.get(key + "_rating") == val else val
+                    ms.save_session(); render()
+                b.bind(on_release=tap)
+                row.add_widget(b)
+            return row
+
+        def note_field(key):
+            fc = Card(bg_color=CARD_LIGHT, radius=8, size_hint_y=None, height=dp(40))
+            ti = ThemedTextInput(text=rp.get(key + "_note", ""), multiline=False, font_size=sp(13),
+                                  hint_text="Not (istege bagli)")
+            notes[key + "_note"] = ti
+
+            def on_focus(instance, is_focused, fc=fc):
+                if is_focused:
+                    self._focused_popup_field = fc
+                    Clock.schedule_once(lambda dt: scroll.scroll_to(fc, padding=dp(24)), 0.05)
+            ti.bind(focus=on_focus)
+            fc.add_widget(ti)
+            return fc
+
+        def obs_section(key, title, hint):
+            form.add_widget(label(title, ACCENT, 12, True))
+            form.add_widget(label(hint, TEXT_MUTED, 11))
+            n = len(rp[key])
+            if n:
+                form.add_widget(thumbs_grid(rp[key], lambda p, key=key: remove_from(key, p)))
+            if n < PHOTO_LIMITS[key]:
+                form.add_widget(add_btn(f"Galeriden Fotograf Ekle ({n}/{PHOTO_LIMITS[key]})",
+                                         lambda key=key: pick_into(key, True)))
+            form.add_widget(label("Degerlendirme (istege bagli):", TEXT_MUTED, 11))
+            form.add_widget(rating_row(key))
+            form.add_widget(note_field(key))
+
+        def render():
+            form.clear_widgets()
+            notes.clear()
+            form.add_widget(label("KAPAK FOTOGRAFI", ACCENT, 12, True))
+            form.add_widget(label("Raporun ilk sayfasinda gorunur. Secilmezse kapakta fotograf olmaz.", TEXT_MUTED, 11))
+            if rp["cover"]:
+                form.add_widget(thumbs_grid([rp["cover"]], lambda p: remove_from("cover", p)))
+            form.add_widget(add_btn("Kapak Fotografi Sec" if not rp["cover"] else "Kapak Fotografini Degistir",
+                                     lambda: pick_into("cover", False)))
+            if std:
+                obs_section("face", "OYUNCU YUZ MODELLEMESI (en fazla 2)",
+                            "FIFA/UEFA raporunda ayri bir sayfa olur. Fotograf eklenmezse sayfa cikmaz.")
+                obs_section("shadow", "OYUNCU GOLGELERI (en fazla 2)",
+                            "FIFA/UEFA raporunda ayri bir sayfa olur. Fotograf eklenmezse sayfa cikmaz.")
+            else:
+                form.add_widget(label("Yuz modelleme ve golge sayfalari yalnizca FIFA / UEFA raporlarinda yer alir.",
+                                       TEXT_MUTED, 11))
+            form.add_widget(label("TAMAMLANMIS KURULUM FOTOGRAFLARI", ACCENT, 12, True))
+            form.add_widget(label("Isin bitmis halinin fotograflari; sayfa basina 4 fotograf. Sayi serbest.", TEXT_MUTED, 11))
+            if rp["final"]:
+                form.add_widget(thumbs_grid(rp["final"], lambda p: remove_from("final", p)))
+            n = len(rp["final"])
+            if n < PHOTO_LIMITS["final"]:
+                form.add_widget(add_btn(f"Galeriden Fotograf Ekle ({n}/{PHOTO_LIMITS['final']})",
+                                         lambda: pick_into("final", True)))
+
+        render()
+        popup = Popup(title="", content=content, size_hint=(0.94, 0.9), auto_dismiss=False,
+                       background_color=(0, 0, 0, 0), background='', separator_height=0, title_size=0)
+
+        def close(*a):
+            commit_notes()
+            ms.save_session()
+            popup.dismiss()
+        done = FlatButton(text="Tamam", bg_color=SUCCESS, font_size=sp(14), bold=True,
+                           size_hint_y=None, height=dp(46))
+        done.bind(on_release=close)
+        content.add_widget(done)
+        popup.bind(on_dismiss=lambda *a: self._refresh_photos_btn())
+        popup.open()
+
+    def _photos_btn_text(self):
+        rp = self.measure_screen.report_photos
+        n = (1 if rp["cover"] else 0) + len(rp["face"]) + len(rp["shadow"]) + len(rp["final"])
+        return "Rapor Fotograflari" + (f"  ({n})" if n else "")
+
+    def _refresh_photos_btn(self):
+        try:
+            self.photos_btn.text = self._photos_btn_text()
+        except Exception:
+            pass
+
     def _export_dir(self):
         """Gecici (herkese acik olmayan) calisma klasoru - dosya once buraya
         yazilir, sonra _save_file_with_picker() ile kullanicinin sectigi konuma kaydedilir."""
@@ -3790,12 +4138,33 @@ class ReportScreen(Screen):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             fname = f"aydinlatma_raporu_{ts}.pdf"
             fpath = os.path.join(self._export_dir(), fname)
-            if free:
-                report_pdf.build_free_pdf(data, lang, base, fpath)
-            elif fiba:
-                report_pdf.build_fiba_pdf(data, lang, FIBA_STANDARDS, base, fpath)
-            else:
-                report_pdf.build_match_pdf(data, lang, STANDARDS, base, fpath)
+
+            def build():
+                if free:
+                    report_pdf.build_free_pdf(data, lang, base, fpath)
+                elif fiba:
+                    report_pdf.build_fiba_pdf(data, lang, FIBA_STANDARDS, base, fpath)
+                else:
+                    report_pdf.build_match_pdf(data, lang, STANDARDS, base, fpath)
+
+            data["photos"] = dict(ms.report_photos)
+            has_photos = any([ms.report_photos.get("cover"), ms.report_photos.get("face"),
+                              ms.report_photos.get("shadow"), ms.report_photos.get("final")])
+            if has_photos and not report_pdf._pil():
+                self._show_message_popup("Fotograflar", "Bu cihazda gorsel kutuphanesi (Pillow) yok; rapor fotografsiz olusturulacak.")
+            try:
+                build()
+            except Exception:
+                # Fotograflar yuzunden bir sorun olduysa, ESKI rapora dusmeden
+                # once fotografsiz YENI raporu dene.
+                import traceback
+                traceback.print_exc()
+                if not any([ms.report_photos.get("cover"), ms.report_photos.get("face"),
+                            ms.report_photos.get("shadow"), ms.report_photos.get("final")]):
+                    raise
+                data["photos"] = {}
+                build()
+                self._show_message_popup("Fotograflar", "Fotograflar rapora eklenemedi; rapor fotografsiz olusturuldu.")
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -5310,6 +5679,11 @@ class ReportScreen(Screen):
                                font_size=sp(13), bold=True, size_hint_y=None, height=dp(46))
         fifa_btn.bind(on_release=lambda b: self._open_fifa_info_popup())
         self.content_area.add_widget(fifa_btn)
+
+        self.photos_btn = FlatButton(text=self._photos_btn_text(), bg_color=ACCENT,
+                                      font_size=sp(13), bold=True, size_hint_y=None, height=dp(46))
+        self.photos_btn.bind(on_release=lambda b: self._open_photos_popup())
+        self.content_area.add_widget(self.photos_btn)
 
         lang_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         lang_label = Label(text="Rapor Dili:", font_size=sp(13), color=TEXT_MUTED,

@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas,ttf,svg
 
 version = 1.0
 
-requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,openpyxl,fpdf2,fonttools,et_xmlfile
+requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,openpyxl,fpdf2,fonttools,et_xmlfile,pillow
 p4a.source_dir = ./p4a-src
 
 orientation = portrait

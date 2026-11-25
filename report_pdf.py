@@ -106,7 +106,35 @@ I = {
     "param": ("Parametre", "Parameter"), "avg_flicker": ("Ortalama flicker faktörü", "Average flicker factor"),
     "max_flicker": ("Maksimum flicker faktörü", "Maximum flicker factor"),
     "not_entered": ("girilmedi", "not entered"),
-    "notes_title": ("Notlar ve Onay", "Notes & Approval"), "notes": ("Notlar", "Notes"),
+    "notes_title": ("Onay", "Approval"), "notes": ("Notlar", "Notes"),
+    "appr_text": ("Bu rapor, belirtilen standart ve ölçüm koşulları kapsamında, sahada alınan ölçümlere dayanılarak hazırlanmıştır.",
+                  "This report has been prepared from on-site measurements, within the scope of the stated standard and measurement conditions."),
+    "ph_face_title": ("Oyuncu Yüz Modellemesi", "Player Face Modelling"),
+    "ph_face_sub": ("Işığın geliş açısı ve oyuncu yüzlerindeki gölgelenmenin değerlendirilmesi",
+                    "Assessment of the light incidence angle and shading on player faces"),
+    "ph_shadow_title": ("Oyuncu Gölgeleri", "Player Shadows"),
+    "ph_shadow_sub": ("Sahada oluşan gölgelerin yapısının değerlendirilmesi", "Assessment of the character of shadows cast on the pitch"),
+    "ph_req": ("Standart gereksinimi", "Standard requirement"),
+    "ph_src": ("Kaynak", "Source"),
+    "ph_obs": ("Saha gözlemi", "Site observation"),
+    "ph_obs_note": ("Değerlendirme görsel gözleme dayanır; T-10MA ile ölçülmez.", "The assessment is based on visual observation and is not measured with the T-10MA."),
+    "ph_note": ("Not", "Note"),
+    "ph_photo": ("Fotoğraf", "Photo"),
+    "ph_r_good": ("İYİ", "GOOD"), "ph_r_fair": ("KABUL EDİLEBİLİR", "ACCEPTABLE"), "ph_r_poor": ("YETERSİZ", "INSUFFICIENT"),
+    "ph_face_good": ("Sahada yapılan gözlemde oyuncu yüzlerinde belirgin koyu gölge oluşmadığı, yüz hatlarının net seçilebildiği ve yüz modellemesinin standardın beklentisini karşıladığı değerlendirilmiştir.",
+                     "On-site observation found no pronounced dark shadows on player faces; facial features are clearly discernible and face modelling meets the expectations of the standard."),
+    "ph_face_fair": ("Yüz modellemesinin genel olarak yeterli olduğu, ancak bazı bölgelerde yüzlerdeki gölgelenmenin arttığı gözlenmiştir. İlgili bölgelerde armatür açılarının ve nişlemesinin gözden geçirilmesi önerilir.",
+                     "Face modelling is generally adequate, but increased shading on faces was observed in some areas. A review of luminaire angles and aiming in the affected areas is recommended."),
+    "ph_face_poor": ("Oyuncu yüzlerinde, özellikle göz ve burun çevresinde derin ve koyu gölgeler gözlenmiştir; yüz modellemesi standardın beklentisini karşılamamaktadır. Armatür açıları (saha çevresine dik doğrultuya göre en az 20°) ve nişleme gözden geçirilmelidir.",
+                     "Deep, dark shadows were observed on player faces, particularly around the eyes and nose; face modelling does not meet the expectations of the standard. Luminaire angles (at least 20° to the perpendicular of the pitch perimeter) and aiming should be reviewed."),
+    "ph_sh_good": ("Sahada yapılan gözlemde oyuncu gölgelerinin yumuşak olduğu, sert ve belirgin gölge oluşmadığı değerlendirilmiştir.",
+                   "On-site observation found player shadows to be soft, with no hard or pronounced shadows."),
+    "ph_sh_fair": ("Gölgelerin çoğunlukla yumuşak olduğu, ancak bazı bölgelerde daha belirgin gölge oluştuğu gözlenmiştir. Bu bölgelerde farklı yönlerden ek ışık katkısı değerlendirilebilir.",
+                   "Shadows are mostly soft, but more pronounced shadows were observed in some areas. Additional light contribution from other directions may be considered in these areas."),
+    "ph_sh_poor": ("Sahada sert gölgeler gözlenmiştir. Sahanın her bölgesi için farklı konumlardan birden çok ışık kaynağı sağlanması ve armatür nişlemesinin gözden geçirilmesi önerilir.",
+                   "Hard shadows were observed on the pitch. Providing multiple light sources from various locations for each area of the pitch, and a review of luminaire aiming, is recommended."),
+    "ph_final_title": ("Tamamlanmış Kurulum Fotoğrafları", "Photographs of the Completed Installation"),
+    "ph_final_sub": ("Ölçüm yapılan tesisin tamamlanmış hâli", "Completed installation of the measured facility"),
     "approved_by": ("ONAYLAYAN", "APPROVED BY"), "name_sig": ("Ad / imza / tarih", "Name / signature / date"),
     "fiba_std": ("FIBA Resmi Basketbol Kuralları 2024, Bölüm 12", "FIBA Official Basketball Rules 2024, Chapter 12"),
     "fiba_std_sub": ("Tablo 5 - aydınlık şiddeti gereksinimleri", "Table 5 - illuminance requirements"),
@@ -193,6 +221,29 @@ def make_translator(lang):
         s = str(s)
         return EN_VALUES.get(s, s) if lang == "en" else TR_VALUES.get(s, s)
     return t, num, val
+
+
+FACE_GUIDE = (
+    ("Işık akısı oyunculara doğru açıyla ulaşmalı; yüzlerde, bakılan yönden bağımsız olarak koyu gölgeler oluşmamalıdır.",
+     "The luminous flux must reach the players at the correct angle; dark shadows across player faces must be avoided irrespective of the direction faced."),
+    ("Armatürler, saha çevresine dik doğrultuya göre en az 20° açıyla konumlandırılmalıdır (optimum açı 25°–30°).",
+     "Luminaires should be positioned so that the minimum angle to the perpendicular of the pitch perimeter is 20° (optimum 25°–30°)."),
+    ("Dik (yüksek) açıdan gelen ışık göz ve burun çevresinde derin, koyu gölgeler oluşturur; doğru açı, yayıncılar ve seyirciler açısından iyi yüz modellemesi sağlar.",
+     "Light arriving from a steep angle casts deep, dark eye and nose shadows; the correct angle gives good face modelling for both broadcasters and spectators."),
+    ("Maç sırasında oyuncu konumu ve kamera açısı sürekli değiştiğinden sahanın TV stüdyosu düzeyinde yüz modellemesi sağlaması beklenmez; hedef tutarlı ve iyi bir aydınlatma koşuludur.",
+     "As player position and camera viewpoint change continually, a pitch is not expected to match TV-studio face modelling; the aim is a consistently good lighting condition."),
+)
+SHADOW_GUIDE = (
+    ("Aydınlatma sistemlerinin sahada oluşturduğu yapay gölgeler, seyirciler ve yayıncılar için görsel netliği azaltır; mümkünse ortadan kaldırılmalı ya da yumuşak gölgeye indirgenmelidir.",
+     "Artificial shadows cast on the pitch by floodlighting detract from visual clarity for spectators and broadcasters; they should be eliminated where possible or reduced to soft shadows."),
+    ("Tasarım aşamasında oyuncu gölgelerinin oluşumu değerlendirilmeli ve sert gölgeler giderilmelidir; bu genellikle sahanın her bölgesi için farklı konumlardan birden çok ışık kaynağı kullanılarak sağlanır.",
+     "During design, the production of player shadows should be evaluated and hard shadows eliminated, generally by using multiple light sources from various locations for each area of the pitch."),
+    ("Böylece gölgeler azalır ve oyuncuların tüm vücudunda iyi bir aydınlık modellemesi elde edilir; bu, tüm düzlemlerde yeterli düşey aydınlık şiddeti ve düzgünlük için gereklidir.",
+     "Shadows are thereby reduced and players benefit from good modelling around the entire body, which is essential for adequate vertical illuminance and uniformity on all planes."),
+    ("Dört köşe kule/direk sistemleri genellikle sahanın farklı bölgelerinde değişen sert gölgeler üretir; bu tür kurulumlarda tutarlı biçimde yumuşak gölge elde etmek mümkün değildir.",
+     "Four-corner tower/column systems generally produce hard shadows that vary across the pitch; consistently soft shadows cannot be achieved with this type of installation."),
+)
+SRC = {"FIFA": "FIFA Lighting Guide (2020)", "UEFA": "UEFA Stadium Lighting Guide 2023"}
 
 
 class Rep(FPDF):
@@ -347,13 +398,166 @@ def legend_bar(p, x, y, w, lo, hi):
 
 
 def notes_page(p, t, signer=""):
+    """Son sayfa: serbest not satirlari YOK; yalnizca onay / imza kutulari."""
     p.newpage(t("notes_title"), "")
-    p.txt(LX, 46, 40, 5, t("notes"), "B", 9)
-    for i in range(10): p.hline(56 + i * 9, LX, RX)
+    p.rr(LX, 46, CW, 16, 3, CARD)
+    p.f("", 8, GRAY); p.set_xy(LX + 5, 49.2); p.multi_cell(CW - 10, 4.2, t("appr_text"))
     for i, lab in enumerate((t("measured_by"), t("approved_by"))):
-        x = LX + i * 91; p.rr(x, 170, 87, 38, 3, (255, 255, 255), LINE); p.txt(x + 5, 173, 70, 4, lab, "M", 6.5, GRAY)
-        if i == 0 and signer: p.txt(x + 5, 190, 77, 5, signer, "M", 8)
-        p.hline(200, x + 5, x + 82); p.txt(x + 5, 201.5, 77, 4, t("name_sig"), "", 6.5, GRAY)
+        x = LX + i * 91; p.rr(x, 72, 87, 44, 3, (255, 255, 255), LINE); p.txt(x + 5, 75, 70, 4, lab, "M", 6.5, GRAY)
+        if i == 0 and signer: p.txt(x + 5, 95, 77, 5, signer, "M", 8)
+        p.hline(106, x + 5, x + 82); p.txt(x + 5, 107.5, 77, 4, t("name_sig"), "", 6.5, GRAY)
+
+
+# ------------------------------------------------------------ fotograflar
+def _pil():
+    try:
+        from PIL import Image, ImageOps  # noqa
+        return True
+    except Exception:
+        return False
+
+
+def clean_photos(data):
+    """data['photos'] icinden yalnizca gercekten acilabilen fotograflari dondurur.
+    Pillow yoksa veya dosya bozuksa o foto sessizce atlanir (rapor yine uretilir)."""
+    ph = (data or {}).get("photos") or {}
+    out = {"cover": None, "face": [], "shadow": [], "final": [],
+           "face_rating": ph.get("face_rating") or "", "face_note": (ph.get("face_note") or "").strip(),
+           "shadow_rating": ph.get("shadow_rating") or "", "shadow_note": (ph.get("shadow_note") or "").strip()}
+    if not _pil():
+        return out
+    from PIL import Image
+
+    def ok(path):
+        try:
+            if not path or not os.path.exists(path): return False
+            with Image.open(path) as im: im.verify()
+            return True
+        except Exception:
+            return False
+    if ok(ph.get("cover")): out["cover"] = ph["cover"]
+    for k in ("face", "shadow", "final"):
+        out[k] = [x for x in (ph.get(k) or []) if ok(x)]
+    return out
+
+
+def _prep_image(path, w_mm, h_mm, cover):
+    """Fotografi kutuya gore hazirlar (EXIF yonu duzeltilir, kirpilir/kucultulur, JPEG).
+    Donus: (BytesIO, cizim_w_mm, cizim_h_mm)"""
+    import io
+    from PIL import Image, ImageOps
+    im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    iw, ih = im.size; box = w_mm / h_mm
+    if cover:
+        if iw / ih > box:
+            nw = int(ih * box); x0 = (iw - nw) // 2; im = im.crop((x0, 0, x0 + nw, ih))
+        else:
+            nh = int(iw / box); y0 = (ih - nh) // 2; im = im.crop((0, y0, iw, y0 + nh))
+        dw, dh = w_mm, h_mm
+    else:
+        if iw / ih > box: dw, dh = w_mm, w_mm * ih / iw
+        else: dw, dh = h_mm * iw / ih, h_mm
+    px = int(max(dw, dh) / 25.4 * 170)  # ~170 dpi
+    im.thumbnail((px, px))
+    buf = io.BytesIO(); im.save(buf, "JPEG", quality=82, optimize=True); buf.seek(0)
+    return buf, dw, dh
+
+
+def photo_cell(p, path, x, y, w, h, cover=False, caption=""):
+    """Cercevelenmis foto kutusu; basarisiz olursa False doner (hicbir sey cizmez)."""
+    try:
+        cap = 6 if caption else 0
+        buf, dw, dh = _prep_image(path, w - 4, h - 4 - cap, cover)
+    except Exception:
+        return False
+    p.rr(x, y, w, h, 3, (255, 255, 255), LINE)
+    ix = x + (w - dw) / 2; iy = y + 2 + ((h - 4 - cap) - dh) / 2
+    try:
+        p.image(buf, ix, iy, dw, dh)
+    except Exception:
+        return False
+    if caption: p.txt(x + 3, y + h - 6, w - 6, 4, caption, "", 6.5, GRAY)
+    return True
+
+
+def _chunk(lst, n):
+    return [lst[i:i + n] for i in range(0, len(lst), n)]
+
+
+def obs_page(p, t, org, kind, ph):
+    """Oyuncu Yuz Modellemesi / Oyuncu Golgeleri sayfasi (FIFA / UEFA)."""
+    face = kind == "face"
+    photos = ph["face" if face else "shadow"][:2]
+    if not photos: return
+    p.newpage(t("ph_face_title" if face else "ph_shadow_title"), t("ph_face_sub" if face else "ph_shadow_sub"))
+    # standart gereksinimi karti
+    idx = 0 if t("rep_title").startswith("AYD") else 1
+    guide = [g[idx] for g in (FACE_GUIDE if face else SHADOW_GUIDE)]
+    p.f("", 7.2, INK); lines_all = []
+    for g in guide:
+        try: ls = p.multi_cell(CW - 20, 3.7, g, dry_run=True, output="LINES")
+        except Exception: ls = [g]
+        lines_all.append(ls)
+    hh = 14 + sum(len(ls) * 3.7 + 1.8 for ls in lines_all) + 6
+    p.rr(LX, 46, CW, hh, 3, CARD)
+    p.rr(LX, 46, 1.6, hh, .8, YEL)
+    p.txt(LX + 6, 49, 100, 5, t("ph_req"), "B", 8.5)
+    yy = 56.5
+    for ls in lines_all:
+        p.set_fill_color(*BRAND); p.ellipse(LX + 6.2, yy + 1.3, 1.2, 1.2, "F")
+        p.f("", 7.2, INK); p.set_xy(LX + 10, yy); p.multi_cell(CW - 16, 3.7, "\n".join(ls))
+        yy += len(ls) * 3.7 + 1.8
+    p.txt(LX + 6, 46 + hh - 5.2, CW - 12, 4, t("ph_src") + ": " + SRC.get(org, org), "", 6.3, GRAY)
+    # fotograflar
+    y = 46 + hh + 6; ph_h = 112
+    for i, path in enumerate(photos):
+        x = LX + i * 91
+        photo_cell(p, path, x, y, 87, ph_h, caption=f"{t('ph_photo')} {i + 1}")
+    y += ph_h + 6
+    # degerlendirme
+    rating = ph["face_rating" if face else "shadow_rating"]; note = ph["face_note" if face else "shadow_note"]
+    if rating in ("good", "fair", "poor") or note:
+        ey = y
+        sent = ""
+        if rating in ("good", "fair", "poor"):
+            sent = t(("ph_face_" if face else "ph_sh_") + rating)
+        p.f("", 7.5, INK); body = []
+        if sent:
+            try: body += p.multi_cell(CW - 12, 4, sent, dry_run=True, output="LINES")
+            except Exception: body += [sent]
+        nl = []
+        if note:
+            try: nl = p.multi_cell(CW - 12, 4, t("ph_note") + ": " + note, dry_run=True, output="LINES")[:4]
+            except Exception: nl = [note]
+        eh = 13 + len(body) * 4 + (len(nl) * 4 + 2 if nl else 0) + 6
+        eh = min(eh, 284 - 4 - ey)
+        p.rr(LX, ey, CW, eh, 3, (255, 255, 255), LINE)
+        p.txt(LX + 6, ey + 3, 60, 5, t("ph_obs"), "B", 8.5)
+        if rating in ("good", "fair", "poor"):
+            lab = t("ph_r_" + rating); w = len(lab) * 1.9 + 8
+            p.rr(RX - w - 5, ey + 3, w, 5.2, 2.6, {"good": OK_BG, "fair": WARN_BG, "poor": BAD_BG}[rating])
+            p.txt(RX - w - 5, ey + 3, w, 5.2, lab, "B", 6, {"good": OK_TX, "fair": WARN_TX, "poor": BAD_TX}[rating], "C")
+        yy = ey + 11
+        if body:
+            p.f("", 7.5, INK); p.set_xy(LX + 6, yy); p.multi_cell(CW - 12, 4, "\n".join(body)); yy += len(body) * 4 + 2
+        if nl:
+            p.f("", 7.5, GRAY); p.set_xy(LX + 6, yy); p.multi_cell(CW - 12, 4, "\n".join(nl)); yy += len(nl) * 4
+        p.txt(LX + 6, ey + eh - 5, CW - 12, 4, t("ph_obs_note"), "", 6, GRAY)
+
+
+def final_photo_pages(p, t, ph):
+    """Tamamlanmis kurulum fotograflari: sayfa basina 4 (2x2); tek foto ise tam genislik."""
+    photos = ph["final"]
+    if not photos: return
+    n = len(photos); num = 0
+    for chunk in _chunk(photos, 4):
+        p.newpage(t("ph_final_title"), t("ph_final_sub"))
+        if n == 1:
+            photo_cell(p, chunk[0], LX, 46, CW, 150, caption=f"{t('ph_photo')} 1"); num += 1; continue
+        for i, path in enumerate(chunk):
+            x = LX + (i % 2) * 91; y = 46 + (i // 2) * 116
+            num += 1
+            photo_cell(p, path, x, y, 87, 110, caption=f"{t('ph_photo')} {num}")
 
 
 def _f(v, default=""):
@@ -365,24 +569,17 @@ def _num(s):
     except Exception: return None
 
 
-def cover_page(p, t, name, kind_title, chip, date, loc, by, R, C, seq, L, W, fiba=False, plain=False):
+def cover_page(p, t, name, kind_title, chip, date, loc, by, cover_photo=None):
     p.newpage("", cover=True)
     p.logo_img(RX - 52, 14, 52)
     p.txt(LX, 92, 170, 5, kind_title, "M", 8.5, GRAY)
     p.set_xy(LX, 99); p.f("B", 26); p.multi_cell(170, 11, name or "-")
     ytag = max(p.get_y() + 3, 124)
     w = len(chip) * 2.6 + 12; p.rr(LX, ytag, w, 8.5, 4.25, YEL); p.txt(LX, ytag, w, 8.5, chip, "B", 8.5, INK, "C")
-    # dekoratif ozet cizim: gercek izgara boyutunda nokta deseni (veriye bagli)
-    gx, gy, gw = 36, 150, 138; gh = gw * (W / L) if L else gw * .65; gh = min(gh, 80)
-    p.rr(gx - 6, gy - 6, gw + 12, gh + 12, 4, CARD, LINE)
-    p.set_draw_color(205, 205, 200); p.set_line_width(.4); p.rect(gx, gy, gw, gh)
-    if not plain: p.line(gx + gw / 2, gy, gx + gw / 2, gy + gh); p.ellipse(gx + gw / 2 - 9, gy + gh / 2 - 9, 18, 18)
-    pts = [(gx + r * gw / max(R - 1, 1), gy + c * gh / max(C - 1, 1)) for (r, c) in seq]
-    p.set_draw_color(215, 215, 210); p.set_line_width(.25)
-    for a, b in zip(pts, pts[1:]): p.line(a[0], a[1], b[0], b[1])
-    for i, (x, y) in enumerate(pts):
-        p.set_fill_color(*(YEL if i == 0 else BRAND if i == len(pts) - 1 else (255, 255, 255))); p.set_draw_color(*BRAND); p.set_line_width(.2)
-        p.ellipse(x - 1.1, y - 1.1, 2.2, 2.2, "DF")
+    # kapak fotografi (galeriden secilen); secilmediyse bos birakilir
+    if cover_photo:
+        py = ytag + 8.5 + 9; ph_ = min(104, 238 - py)
+        if ph_ >= 50: photo_cell(p, cover_photo, LX, py, CW, ph_, cover=True)
     for i, (a, b) in enumerate(((t("date"), date), (t("location"), loc), (t("measured_by"), by))):
         x = LX + i * 60; p.txt(x, 246, 55, 4, a, "M", 6.5, GRAY); p.txt(x, 251, 58, 6, b or "-", "M", 10)
     p.txt(LX, 268, CW, 4, "sahgroup.net  ·  " + datetime.now().strftime("%d.%m.%Y %H:%M"), "", 7, GRAY)
@@ -465,7 +662,7 @@ def _reqs(th, title, kind):
 
 
 def build_match_pdf(data, lang, standards, assets_dir, out_path):
-    t, num, val = make_translator(lang)
+    t, num, val = make_translator(lang); ph = clean_photos(data)
     proj, fi = data["project_info"], data["fifa_info"]; org, level = data["org"], data["level"]
     R, C = data["rows_count"], data["cols_count"]; seq = data["raw_sequence"]; meas = data["raw_measurements"]
     th = standards[org][level]; name = proj.get("name") or "-"; p = Rep(name, assets_dir, t)
@@ -473,7 +670,7 @@ def build_match_pdf(data, lang, standards, assets_dir, out_path):
     L = _num(fi.get("pitch_length")) or 105.0; W = _num(fi.get("pitch_width")) or 68.0
     std_name = f"{org} {level}"; incomplete = data["measured_count"] < data["total_points"]
     plane_name = {k: t("p_" + k) for k in PLANE_KEYS}
-    cover_page(p, t, name, t("rep_title"), f"{org}  ·  {level}", proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), R, C, seq, L, W)
+    cover_page(p, t, name, t("rep_title"), f"{org}  ·  {level}", proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), ph["cover"])
     cover_sheet(p, t, proj, fi, f"{org} - {level}", f"{R} x {C}  ·  {data['total_points']} {t('points')}", club=(org == "UEFA"))
 
     # --- standart gereksinimleri
@@ -603,6 +800,7 @@ def build_match_pdf(data, lang, standards, assets_dir, out_path):
             (t("cct"), th.get("cct", ""), fi.get("colour_temp_tc") or ne), (t("ra"), f">= {th.get('ra')} Ra", fi.get("colour_rendering_ra") or ne),
             (t("rg"), th.get("rg", ""), fi.get("glare_rating_rg") or ne)]
     table(p, LX, 46, [74, 52, 52], [t("param"), t("req"), t("meas")], rows, 8)
+    obs_page(p, t, org, "face", ph); obs_page(p, t, org, "shadow", ph); final_photo_pages(p, t, ph)
     notes_page(p, t, fi.get("inspector_name") or "")
     p.output(out_path)
     return out_path
@@ -610,11 +808,11 @@ def build_match_pdf(data, lang, standards, assets_dir, out_path):
 
 # ===================================================================== FIBA
 def build_fiba_pdf(data, lang, fiba_standards, assets_dir, out_path):
-    t, num, val = make_translator(lang)
+    t, num, val = make_translator(lang); ph = clean_photos(data)
     proj, fi = data["project_info"], data["fifa_info"]; R, C = data["rows_count"], data["cols_count"]; seq = data["raw_sequence"]; meas = data["raw_measurements"]
     name = proj.get("name") or "-"; p = Rep(name, assets_dir, t); gn = {rc: i + 1 for i, rc in enumerate(seq)}
     P, T = fiba_standards["PPA"], fiba_standards["TPA"]; margin = data["ppa_margin"]; ok_all = data["all_pass"]
-    cover_page(p, t, name, t("rep_title_bb"), "FIBA  ·  PPA / TPA", proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), R, C, seq, 35, 22, True)
+    cover_page(p, t, name, t("rep_title_bb"), "FIBA  ·  PPA / TPA", proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), ph["cover"])
     cover_sheet(p, t, proj, fi, t("fiba_std"), f"{R} x {C}  ·  {data['total_points']} {t('points')}  ·  {t('round1')}  ·  {t('round2')}", fiba=True, areas_txt="TPA 22 x 35 m  /  PPA 19 x 32 m")
 
     p.newpage(t("std_title"), t("fiba_std") + "  ·  " + t("fiba_std_sub"))
@@ -695,6 +893,7 @@ def build_fiba_pdf(data, lang, fiba_standards, assets_dir, out_path):
                 p.txt(LX + 15, yy + 6, 100, 5, "-", "", 8, GRAY); continue
             a, mn, mx, u1, u2 = _stats(vals)
             for i, (la, v) in enumerate((("AVERAGE", f"{a:.0f}"), ("MINIMUM", f"{mn}"), ("MAXIMUM", f"{mx}"), ("U1", num(u1)), ("U2", num(u2)))): kpi(p, LX + 15 + i * 32.6, yy, 30, 18, t(la), v)
+    final_photo_pages(p, t, ph)
     notes_page(p, t, fi.get("inspector_name") or "")
     p.output(out_path)
     return out_path
@@ -704,14 +903,14 @@ def build_fiba_pdf(data, lang, fiba_standards, assets_dir, out_path):
 def build_free_pdf(data, lang, assets_dir, out_path):
     """Standart secilmeden alinan olcum raporu. Hicbir standarda gore uygun/degil DEMEZ.
     Kullanici hedef girdiyse yalnizca o hedeflerle karsilastirir (data['checks'])."""
-    t, num, val = make_translator(lang)
+    t, num, val = make_translator(lang); ph = clean_photos(data)
     proj, fi = data["project_info"], data["fifa_info"]; R, C = data["rows_count"], data["cols_count"]
     seq = data["raw_sequence"]; meas = data["raw_measurements"]; probes = data["probes"]; metrics = data["metrics"]
     checks = data["checks"]; has_t = data["has_targets"]
     name = proj.get("name") or "-"; p = Rep(name, assets_dir, t); gn = {rc: i + 1 for i, rc in enumerate(seq)}
     Ld, Wd = _num(fi.get("pitch_length")), _num(fi.get("pitch_width")); L = Ld or float(R); W = Wd or float(C)
     plane_name = {k: t("p_" + k) for k in PLANE_KEYS}; incomplete = data["measured_count"] < data["total_points"]
-    cover_page(p, t, name, t("rep_title"), t("chip_free"), proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), R, C, seq, L, W, plain=True)
+    cover_page(p, t, name, t("rep_title"), t("chip_free"), proj.get("date"), proj.get("location"), proj.get("prepared_by") or fi.get("inspector_name"), ph["cover"])
     cover_sheet(p, t, proj, fi, t("no_std"), f"{R} x {C}  ·  {data['total_points']} {t('points')}", free=True, head_keys=probes)
 
     # --- sonuc ozeti
@@ -796,6 +995,7 @@ def build_free_pdf(data, lang, assets_dir, out_path):
                  ("U1", num(m["u1"]), rq("u1", True), ck.get("u1", {}).get("ok")),
                  ("U2", num(m["u2"]), rq("u2", True), ck.get("u2", {}).get("ok"))]
         for i, (la, v, rqs, ok) in enumerate(cards): kpi(p, LX + i * 36.25, 196, 33, 22, t(la), v, rqs, ok)
+    final_photo_pages(p, t, ph)
     notes_page(p, t, fi.get("inspector_name") or "")
     p.output(out_path)
     return out_path
