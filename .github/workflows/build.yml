@@ -28,14 +28,20 @@ jobs:
       - name: Ek Linux bagimliligi
         run: sudo apt -y install automake autoconf libtool libltdl-dev
 
-      - name: Sabit imza anahtari (guncelleme ustune kurulabilsin)
-        run: |
-          mkdir -p ~/.android
-          cp signing/debug.keystore ~/.android/debug.keystore
-
       - name: APK derle
         run: |
           yes | buildozer android debug
+
+      - name: APK'yi sabit anahtarla imzala (guncelleme ustune kurulabilsin)
+        continue-on-error: true
+        run: |
+          APKSIGNER=$(find / -path "*build-tools*" -name apksigner -type f 2>/dev/null | sort -V | tail -1)
+          echo "apksigner: $APKSIGNER"
+          for f in bin/*.apk; do
+            "$APKSIGNER" sign --ks signing/debug.keystore --ks-pass pass:android \
+              --key-pass pass:android --ks-key-alias androiddebugkey "$f"
+            "$APKSIGNER" verify --print-certs "$f" | head -3
+          done
 
       - name: APK'yi yukle
         uses: actions/upload-artifact@v4
