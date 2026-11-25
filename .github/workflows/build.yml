@@ -28,6 +28,11 @@ jobs:
       - name: Ek Linux bagimliligi
         run: sudo apt -y install automake autoconf libtool libltdl-dev
 
+      - name: Sabit imza anahtari (guncelleme ustune kurulabilsin)
+        run: |
+          mkdir -p ~/.android
+          cp signing/debug.keystore ~/.android/debug.keystore
+
       - name: APK derle
         run: |
           yes | buildozer android debug

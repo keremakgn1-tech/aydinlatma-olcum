@@ -484,6 +484,21 @@ def _chunk(lst, n):
     return [lst[i:i + n] for i in range(0, len(lst), n)]
 
 
+def _aspect(path):
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as im:
+            w, h = ImageOps.exif_transpose(im).size
+        return w / h if h else 1.33
+    except Exception:
+        return 1.33
+
+
+def _need_h(path, cell_w, cap=6):
+    """Fotografin cell_w genisligindeki kutuya sigmasi icin gereken kutu yuksekligi."""
+    return (cell_w - 4) / _aspect(path) + 4 + cap
+
+
 def obs_page(p, t, org, kind, ph):
     """Oyuncu Yuz Modellemesi / Oyuncu Golgeleri sayfasi (FIFA / UEFA)."""
     face = kind == "face"
@@ -509,9 +524,11 @@ def obs_page(p, t, org, kind, ph):
         yy += len(ls) * 3.7 + 1.8
     p.txt(LX + 6, 46 + hh - 5.2, CW - 12, 4, t("ph_src") + ": " + SRC.get(org, org), "", 6.3, GRAY)
     # fotograflar
-    y = 46 + hh + 6; ph_h = 112
+    y = 46 + hh + 6
+    ph_h = max(62, min(112, max(_need_h(pp, 87) for pp in photos)))
+    x_start = LX if len(photos) == 2 else LX + (CW - 87) / 2
     for i, path in enumerate(photos):
-        x = LX + i * 91
+        x = x_start + i * 91
         photo_cell(p, path, x, y, 87, ph_h, caption=f"{t('ph_photo')} {i + 1}")
     y += ph_h + 6
     # degerlendirme
@@ -546,18 +563,29 @@ def obs_page(p, t, org, kind, ph):
 
 
 def final_photo_pages(p, t, ph):
-    """Tamamlanmis kurulum fotograflari: sayfa basina 4 (2x2); tek foto ise tam genislik."""
+    """Tamamlanmis kurulum fotograflari. Yatay foto tek basina (genis), dikey/kare
+    fotograflar yan yana ikili; sayfa basina en fazla 2 sira. Cerceve fotografa gore olculur."""
     photos = ph["final"]
     if not photos: return
-    n = len(photos); num = 0
-    for chunk in _chunk(photos, 4):
-        p.newpage(t("ph_final_title"), t("ph_final_sub"))
-        if n == 1:
-            photo_cell(p, chunk[0], LX, 46, CW, 150, caption=f"{t('ph_photo')} 1"); num += 1; continue
-        for i, path in enumerate(chunk):
-            x = LX + (i % 2) * 91; y = 46 + (i // 2) * 116
-            num += 1
-            photo_cell(p, path, x, y, 87, 110, caption=f"{t('ph_photo')} {num}")
+    items = [(pp, _aspect(pp)) for pp in photos]; n = len(items); rows = []; i = 0
+    while i < n:
+        if items[i][1] > 1.15: rows.append([items[i]]); i += 1
+        elif i + 1 < n and items[i + 1][1] <= 1.15: rows.append([items[i], items[i + 1]]); i += 2
+        else: rows.append([items[i]]); i += 1
+    maxh = 190 if n == 1 else 112
+    pages = _chunk(rows, 1 if n == 1 else 2); num = 0
+    for page_rows in pages:
+        p.newpage(t("ph_final_title"), t("ph_final_sub")); y = 46
+        for row in page_rows:
+            if len(row) == 1 and row[0][1] > 1.15:
+                pp, asp = row[0]; h = maxh; w = min(CW, (h - 10) * asp + 4)
+                num += 1; photo_cell(p, pp, LX + (CW - w) / 2, y, w, h, caption=f"{t('ph_photo')} {num}")
+            else:
+                h = max(62, min(maxh, max(_need_h(pp, 87) for pp, _ in row)))
+                x0 = LX if len(row) == 2 else LX + (CW - 87) / 2
+                for k, (pp, asp) in enumerate(row):
+                    num += 1; photo_cell(p, pp, x0 + k * 91, y, 87, h, caption=f"{t('ph_photo')} {num}")
+            y += h + 6
 
 
 def _f(v, default=""):

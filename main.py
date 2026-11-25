@@ -4152,6 +4152,17 @@ class ReportScreen(Screen):
                               ms.report_photos.get("shadow"), ms.report_photos.get("final")])
             if has_photos and not report_pdf._pil():
                 self._show_message_popup("Fotograflar", "Bu cihazda gorsel kutuphanesi (Pillow) yok; rapor fotografsiz olusturulacak.")
+            if has_photos and report_pdf._pil():
+                try:
+                    cp = report_pdf.clean_photos(data)
+                    std_ = (ms.org in ("FIFA", "UEFA")) and not fiba and not free
+                    want = (1 if ms.report_photos.get("cover") else 0) + len(ms.report_photos.get("final", [])) + \
+                           ((len(ms.report_photos.get("face", [])) + len(ms.report_photos.get("shadow", []))) if std_ else 0)
+                    got = (1 if cp["cover"] else 0) + len(cp["final"]) + ((len(cp["face"]) + len(cp["shadow"])) if std_ else 0)
+                    if got < want:
+                        self._show_message_popup("Fotograflar", f"{want - got} fotograf okunamadigi icin rapora eklenemedi.")
+                except Exception:
+                    pass
             try:
                 build()
             except Exception:
